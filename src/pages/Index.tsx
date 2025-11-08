@@ -2,9 +2,12 @@ import { useState } from "react";
 import { AnalyzerForm } from "@/components/AnalyzerForm";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { ModuleCard } from "@/components/ModuleCard";
+import { FeatureCard } from "@/components/FeatureCard";
 import { generateMockModules, calculateOverallScore } from "@/data/mockModules";
 import { useToast } from "@/hooks/use-toast";
 import { Globe, TrendingUp, Shield, Zap } from "lucide-react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 
 const Index = () => {
   const [analyzing, setAnalyzing] = useState(false);
@@ -93,12 +96,18 @@ const Index = () => {
 
   if (analyzing) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center space-y-4">
-          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto"></div>
-          <h2 className="text-2xl font-bold text-foreground">Analyzing Your Website...</h2>
-          <p className="text-muted-foreground">This may take a few moments</p>
-        </div>
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <div className="mx-auto mb-4">
+              <div className="h-16 w-16 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+            </div>
+            <CardTitle>Analyzing Your Website</CardTitle>
+            <CardDescription>
+              Running comprehensive SEO and GEO analysis across all modules
+            </CardDescription>
+          </CardHeader>
+        </Card>
       </div>
     );
   }
@@ -108,7 +117,7 @@ const Index = () => {
     
     return (
       <div className="min-h-screen bg-background">
-        <div className="container mx-auto px-4 py-8 max-w-7xl">
+        <div className="container mx-auto px-4 py-8 max-w-7xl space-y-8">
           <DashboardHeader
             url={analysisData.url}
             country={analysisData.country}
@@ -119,9 +128,15 @@ const Index = () => {
             onNewAnalysis={handleNewAnalysis}
           />
 
-          <div className="mt-8">
-            <h2 className="text-2xl font-bold text-foreground mb-6">Module Analysis</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-3xl font-bold tracking-tight">Module Analysis</h2>
+              <p className="text-muted-foreground">
+                Detailed breakdown of all SEO and GEO modules
+              </p>
+            </div>
+            
+            <div className="grid gap-6 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
               {analysisData.modules.map((module) => (
                 <ModuleCard
                   key={module.id}
@@ -138,14 +153,14 @@ const Index = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
-      <div className="container mx-auto px-4 py-12 max-w-6xl">
+    <div className="min-h-screen bg-background">
+      <div className="container mx-auto px-4 py-12 max-w-6xl space-y-12">
         {/* Hero Section */}
-        <div className="text-center mb-16 space-y-6">
-          <div className="inline-block p-3 bg-primary/10 rounded-2xl mb-4">
-            <Globe className="w-12 h-12 text-primary" />
+        <div className="text-center space-y-4">
+          <div className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 mb-4">
+            <Globe className="h-8 w-8 text-primary" />
           </div>
-          <h1 className="text-5xl lg:text-6xl font-bold text-foreground mb-4">
+          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl">
             SEO & GEO Analyzer
           </h1>
           <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
@@ -153,49 +168,47 @@ const Index = () => {
           </p>
         </div>
 
+        <Separator />
+
         {/* Features Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-          <div className="bg-card p-6 rounded-xl border-2 border-border hover:border-primary/50 transition-colors">
-            <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center mb-4">
-              <TrendingUp className="w-6 h-6 text-primary" />
-            </div>
-            <h3 className="text-lg font-semibold text-foreground mb-2">Modular Analysis</h3>
-            <p className="text-sm text-muted-foreground">
-              10 specialized modules covering every aspect of SEO and GEO optimization
-            </p>
-          </div>
-          
-          <div className="bg-card p-6 rounded-xl border-2 border-border hover:border-primary/50 transition-colors">
-            <div className="w-12 h-12 bg-secondary/10 rounded-lg flex items-center justify-center mb-4">
-              <Zap className="w-6 h-6 text-secondary" />
-            </div>
-            <h3 className="text-lg font-semibold text-foreground mb-2">Quick Rechecks</h3>
-            <p className="text-sm text-muted-foreground">
-              Recheck individual modules without regenerating the entire report
-            </p>
-          </div>
-          
-          <div className="bg-card p-6 rounded-xl border-2 border-border hover:border-primary/50 transition-colors">
-            <div className="w-12 h-12 bg-success/10 rounded-lg flex items-center justify-center mb-4">
-              <Shield className="w-6 h-6 text-success" />
-            </div>
-            <h3 className="text-lg font-semibold text-foreground mb-2">Regional Precision</h3>
-            <p className="text-sm text-muted-foreground">
-              Target specific countries with localized SEO recommendations
-            </p>
-          </div>
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <FeatureCard
+            icon={TrendingUp}
+            title="Modular Analysis"
+            description="10 specialized modules covering every aspect of SEO and GEO optimization"
+            iconColor="text-primary"
+          />
+          <FeatureCard
+            icon={Zap}
+            title="Quick Rechecks"
+            description="Recheck individual modules without regenerating the entire report"
+            iconColor="text-secondary"
+          />
+          <FeatureCard
+            icon={Shield}
+            title="Regional Precision"
+            description="Target specific countries with localized SEO recommendations"
+            iconColor="text-success"
+          />
         </div>
 
         {/* Analyzer Form */}
-        <div className="max-w-2xl mx-auto bg-card p-8 rounded-2xl shadow-xl border-2 border-border">
-          <h2 className="text-2xl font-bold text-foreground mb-6 text-center">
-            Start Your Analysis
-          </h2>
-          <AnalyzerForm onAnalyze={handleAnalyze} />
+        <div className="max-w-2xl mx-auto">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-center">Start Your Analysis</CardTitle>
+              <CardDescription className="text-center">
+                Enter your website URL and select your target country to begin
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <AnalyzerForm onAnalyze={handleAnalyze} />
+            </CardContent>
+          </Card>
         </div>
 
         {/* Footer Info */}
-        <div className="mt-16 text-center">
+        <div className="text-center">
           <p className="text-sm text-muted-foreground">
             Trusted by developers, agencies, and businesses worldwide
           </p>

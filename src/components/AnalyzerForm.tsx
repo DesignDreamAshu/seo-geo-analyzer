@@ -55,26 +55,24 @@ export const AnalyzerForm = ({ onAnalyze }: AnalyzerFormProps) => {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="space-y-2">
-        <Label htmlFor="url" className="text-base font-medium">
-          Website URL
-        </Label>
+      <div className="grid gap-2">
+        <Label htmlFor="url">Website URL</Label>
         <Input
           id="url"
           type="text"
           placeholder="https://example.com"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          className="h-12 text-base"
         />
+        <p className="text-sm text-muted-foreground">
+          Enter the URL of the website you want to analyze
+        </p>
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="country" className="text-base font-medium">
-          Target Country
-        </Label>
+      <div className="grid gap-2">
+        <Label htmlFor="country">Target Country</Label>
         <Select value={country} onValueChange={setCountry}>
-          <SelectTrigger id="country" className="h-12 text-base">
+          <SelectTrigger id="country">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -85,10 +83,13 @@ export const AnalyzerForm = ({ onAnalyze }: AnalyzerFormProps) => {
             ))}
           </SelectContent>
         </Select>
+        <p className="text-sm text-muted-foreground">
+          Select the primary geographical market for SEO optimization
+        </p>
       </div>
 
-      <Button type="submit" size="lg" className="w-full h-12 text-base font-semibold">
-        <Search className="w-5 h-5 mr-2" />
+      <Button type="submit" className="w-full">
+        <Search className="mr-2 h-4 w-4" />
         Analyze Website
       </Button>
     </form>
