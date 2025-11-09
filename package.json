@@ -4,17 +4,15 @@
   "private": true,
   "type": "module",
   "workspaces": [
-    "apps/frontend",
-    "apps/backend",
+    "apps/*",
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently -r \"npm:dev:frontend\" \"npm:dev:backend\"",
-    "dev:frontend": "npm --workspace apps/frontend run dev",
-    "dev:backend": "npm --workspace apps/backend run dev"
+    "dev": "concurrently -r \"npm --workspace apps/frontend run dev\" \"npm --workspace apps/backend run dev\"",
+    "build": "npm --workspace apps/frontend run build && npm --workspace apps/backend run build",
+    "lint": "npm --workspace apps/frontend run lint"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
   }
 }
-
