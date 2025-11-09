@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "description": "Workspace root for the SEO & GEO Analyzer monorepo",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -10,9 +11,21 @@
   "scripts": {
     "dev": "concurrently -r \"npm --workspace apps/frontend run dev\" \"npm --workspace apps/backend run dev\"",
     "build": "npm --workspace apps/frontend run build && npm --workspace apps/backend run build",
-    "lint": "npm --workspace apps/frontend run lint"
+    "lint": "npm --workspace apps/frontend run lint",
+    "start": "npm --workspace apps/backend run start"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DesignDreamAshu/seo-geo-analyzer.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/DesignDreamAshu/seo-geo-analyzer/issues"
+  },
+  "homepage": "https://github.com/DesignDreamAshu/seo-geo-analyzer#readme"
 }
