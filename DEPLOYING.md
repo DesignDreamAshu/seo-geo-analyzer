@@ -8,12 +8,13 @@ Backend on Render
    - CORS_ORIGIN=https://<netlify-site>.netlify.app
    - GOOGLE_API_KEY=AIzaSyDxRVyH7E-cOoFNSS3asuvehuBMPOBIKdA
 6) Deploy, then test GET /api/health
+7) Set Auto Deploy=Yes and delete any legacy service that targets DreamIcons/dreamicons-app-backend.
 
 Frontend on Netlify
 1) New site from Git
 2) Build command: npm --workspace apps/frontend run build
 3) Publish directory: apps/frontend/dist
-4) Env var: VITE_API_BASE=https://<render-service>.onrender.com
+4) Env var: VITE_API_BASE=https://<render-service>.onrender.com (always match the live Render URL)
 5) Deploy and test
 
 Local dev
