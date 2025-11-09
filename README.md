@@ -67,6 +67,13 @@ npm run build
 2. Configure a keep-alive scheduler (GitHub Actions workflow included) with a secret `HEALTH_URL` pointing to `https://your-api.com/api/health`.
 3. Build the frontend (`npm run build --workspace apps/frontend`) and host the static files (Netlify, Vercel, S3/CloudFront, etc.). Set `VITE_API_BASE` at build time to your deployed API origin.
 
+## Deployment
+
+- **Netlify frontend**
+  - Set environment variable `VITE_API_BASE=https://<render-service>.onrender.com`
+  - Build command: `npm --workspace apps/frontend run build`
+  - Publish directory: `apps/frontend/dist`
+
 ## Backend API
 
 - `GET /api/health` - lightweight health probe used by the UI and the keep-alive workflow.
