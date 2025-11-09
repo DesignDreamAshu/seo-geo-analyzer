@@ -6,8 +6,13 @@ import axios from "axios";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
 
-app.use(cors());
+app.use(
+  cors({
+    origin: CORS_ORIGIN,
+  }),
+);
 app.use(express.json());
 app.use(morgan("dev"));
 
