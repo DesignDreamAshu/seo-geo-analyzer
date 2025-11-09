@@ -1,0 +1,23 @@
+{
+  "name": "@seo-geo/backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "chrome-launcher": "^0.15.2",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "fs-extra": "^11.2.0",
+    "html-pdf-node": "^1.0.8",
+    "lighthouse": "^12.3.0",
+    "nanoid": "^5.0.7"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.1",
+    "typescript": "^5.8.3"
+  }
+}
+
