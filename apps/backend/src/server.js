@@ -279,6 +279,19 @@ app.get("/api/lighthouse-runs/:runId/report", (req, res) => {
     return res.json(variant.record.lighthouse);
   }
   try {
+    res.setHeader(
+      "Content-Security-Policy",
+      [
+        "default-src 'self'",
+        "img-src 'self' data:",
+        "font-src 'self' https: data:",
+        "style-src 'self' 'unsafe-inline' https:",
+        "script-src 'self' 'unsafe-inline'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'self'",
+      ].join("; "),
+    );
     const html = renderReportHtml(variant.record);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     return res.send(html);
