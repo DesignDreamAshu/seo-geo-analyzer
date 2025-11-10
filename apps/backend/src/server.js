@@ -12,8 +12,8 @@ const app = express();
 const ALLOWED_STRATEGIES = new Set(["mobile", "desktop"]);
 const PSI_ENDPOINT = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
 const lighthouseRuns = new Map();
-const aggregatedRuns = new Map(); // key = aggregated run id
-const aggregatedRunsByUrl = new Map(); // key = normalized url
+const aggregatedRuns = new Map(); // key: aggregated run id
+const aggregatedRunsByUrl = new Map(); // key: normalized url -> latest aggregated id
 const DEFAULT_STRATEGIES = ["mobile", "desktop"];
 
 const normalizeUrlInput = (value) => {
@@ -123,29 +123,32 @@ const summarizeVariant = (record) => {
   };
 };
 
+const buildVariantEntry = (record) => ({
+  record,
+  summary: summarizeVariant(record),
+});
+
 const storeAggregatedRun = ({ url, locale, variants }) => {
-  const record = {
+  const aggregated = {
     id: randomUUID(),
     url,
     locale,
     createdAt: new Date().toISOString(),
     variants,
   };
-  aggregatedRuns.set(record.id, record);
-  aggregatedRunsByUrl.set(url, record.id);
-  return record;
+  aggregatedRuns.set(aggregated.id, aggregated);
+  aggregatedRunsByUrl.set(url, aggregated.id);
+  return aggregated;
 };
 
 const formatAggregatedResponse = (record) => ({
   ok: true,
-  run: {
-    id: record.id,
-    url: record.url,
-    locale: record.locale,
-    createdAt: record.createdAt,
-    mobile: summarizeVariant(record.variants.mobile?.record),
-    desktop: summarizeVariant(record.variants.desktop?.record),
-  },
+  id: record.id,
+  url: record.url,
+  locale: record.locale,
+  createdAt: record.createdAt,
+  mobile: record.variants.mobile?.summary ?? null,
+  desktop: record.variants.desktop?.summary ?? null,
 });
 
 const renderReportHtml = (record) => {
@@ -231,7 +234,7 @@ app.post("/api/lighthouse-runs", async (req, res) => {
     for (const strategy of strategies) {
       const payload = await fetchLegacyLighthouse(normalizedUrl, strategy, locale);
       const record = createRunRecord(payload, { url: normalizedUrl, strategy, locale });
-      variants[strategy] = { record };
+      variants[strategy] = buildVariantEntry(record);
     }
 
     const aggregatedRecord = storeAggregatedRun({ url: normalizedUrl, locale, variants });
