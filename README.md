@@ -32,7 +32,7 @@ Create `apps/backend/.env` from the example:
 PORT=4000
 CORS_ORIGIN=http://localhost:8080
 PSI_API_KEY=your-google-pagespeed-api-key
-PSI_TIMEOUT_MS=15000
+PSI_TIMEOUT_MS=60000
 PSI_CACHE_TTL_MS=300000
 PSI_LOCALE=en_US
 PSI_CATEGORIES=performance,seo,best-practices,accessibility

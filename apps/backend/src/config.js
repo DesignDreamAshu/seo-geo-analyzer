@@ -24,6 +24,15 @@ const parseList = (value, fallback) => {
 const DEFAULT_CORS = ["http://localhost:8080"];
 const DEFAULT_CATEGORIES = ["performance", "seo", "best-practices", "accessibility"];
 const DEFAULT_STRATEGY = "mobile";
+const resolvePsiApiKey = () => {
+  if (process.env.PSI_API_KEY?.trim()) {
+    return process.env.PSI_API_KEY.trim();
+  }
+  if (process.env.GOOGLE_API_KEY?.trim()) {
+    return process.env.GOOGLE_API_KEY.trim();
+  }
+  return undefined;
+};
 
 export const config = {
   server: {
@@ -31,8 +40,8 @@ export const config = {
     corsOrigin: parseList(process.env.CORS_ORIGIN, DEFAULT_CORS),
   },
   psi: {
-    apiKey: process.env.PSI_API_KEY,
-    timeoutMs: parseNumber(process.env.PSI_TIMEOUT_MS, 15_000),
+    apiKey: resolvePsiApiKey(),
+    timeoutMs: parseNumber(process.env.PSI_TIMEOUT_MS, 60_000),
     cacheTtlMs: parseNumber(process.env.PSI_CACHE_TTL_MS, 5 * 60 * 1000),
     locale: process.env.PSI_LOCALE?.trim() || "en_US",
     categories: parseList(process.env.PSI_CATEGORIES, DEFAULT_CATEGORIES),

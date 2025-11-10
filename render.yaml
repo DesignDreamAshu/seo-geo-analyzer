@@ -11,5 +11,7 @@ services:
         value: 4000
       - key: CORS_ORIGIN
         value: "*"
+      - key: PSI_API_KEY
+        sync: false
       - key: GOOGLE_API_KEY
         sync: false
