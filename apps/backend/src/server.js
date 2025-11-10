@@ -12,7 +12,9 @@ const app = express();
 const ALLOWED_STRATEGIES = new Set(["mobile", "desktop"]);
 const PSI_ENDPOINT = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
 const lighthouseRuns = new Map();
-const latestRuns = new Map(); // key = `${strategy}:${url}`
+const aggregatedRuns = new Map(); // key = aggregated run id
+const aggregatedRunsByUrl = new Map(); // key = normalized url
+const DEFAULT_STRATEGIES = ["mobile", "desktop"];
 
 const normalizeUrlInput = (value) => {
   if (typeof value !== "string") {
@@ -84,7 +86,7 @@ const buildMockEvents = () => {
   ];
 };
 
-const recordLighthouseRun = (payload, { url, strategy, locale }) => {
+const createRunRecord = (payload, { url, strategy, locale }) => {
   const id = randomUUID();
   const createdAt = new Date().toISOString();
   const record = {
@@ -97,18 +99,53 @@ const recordLighthouseRun = (payload, { url, strategy, locale }) => {
     lighthouse: payload.lighthouseResult,
   };
   lighthouseRuns.set(id, record);
-  latestRuns.set(`${strategy}:${url}`, record);
   return record;
 };
 
-const serializeRun = (record) => ({
+const summarizeVariant = (record) => {
+  if (!record?.lighthouse) {
+    return null;
+  }
+  const audits = record.lighthouse.audits ?? {};
+  const categories = record.lighthouse.categories ?? {};
+  const metricValue = (auditId) => audits[auditId]?.numericValue ?? null;
+  const score = categories.performance?.score;
+  return {
+    id: record.id,
+    score: typeof score === "number" ? Math.round(score * 100) : null,
+    lcp: metricValue("largest-contentful-paint"),
+    cls: metricValue("cumulative-layout-shift"),
+    inp:
+      metricValue("interaction-to-next-paint") ??
+      metricValue("experimental-interaction-to-next-paint") ??
+      metricValue("total-blocking-time"),
+    tbt: metricValue("total-blocking-time"),
+  };
+};
+
+const storeAggregatedRun = ({ url, locale, variants }) => {
+  const record = {
+    id: randomUUID(),
+    url,
+    locale,
+    createdAt: new Date().toISOString(),
+    variants,
+  };
+  aggregatedRuns.set(record.id, record);
+  aggregatedRunsByUrl.set(url, record.id);
+  return record;
+};
+
+const formatAggregatedResponse = (record) => ({
   ok: true,
-  id: record.id,
-  url: record.url,
-  strategy: record.strategy,
-  locale: record.locale,
-  createdAt: record.createdAt,
-  lighthouse: record.lighthouse,
+  run: {
+    id: record.id,
+    url: record.url,
+    locale: record.locale,
+    createdAt: record.createdAt,
+    mobile: summarizeVariant(record.variants.mobile?.record),
+    desktop: summarizeVariant(record.variants.desktop?.record),
+  },
 });
 
 const renderReportHtml = (record) => {
@@ -175,33 +212,30 @@ app.post("/api/audit/lighthouse", async (req, res) => {
   }
 });
 
-const runStrategies = async ({ url, locale, strategies }) => {
-  const entries = await Promise.all(
-    strategies.map(async (strategy) => {
-      const payload = await fetchLegacyLighthouse(url, strategy, locale);
-      const record = recordLighthouseRun(payload, { url, strategy, locale });
-      return [strategy, serializeRun(record)];
-    }),
-  );
-  return Object.fromEntries(entries);
-};
-
 app.post("/api/lighthouse-runs", async (req, res) => {
   const normalizedUrl = normalizeUrlInput(req.body?.url);
   if (!normalizedUrl) {
     return res.status(400).json({ ok: false, error: "Missing URL" });
   }
-  const requestedStrategy = req.body?.strategy || req.body?.device;
   const locale = normalizeLocale(req.body?.locale);
-  const strategies = requestedStrategy ? [normalizeStrategy(requestedStrategy)] : ["mobile", "desktop"];
+  const requestedStrategy = req.body?.strategy || req.body?.device;
+  const strategies = requestedStrategy ? [normalizeStrategy(requestedStrategy)] : DEFAULT_STRATEGIES;
   try {
-    if (strategies.length === 1) {
-      const payload = await fetchLegacyLighthouse(normalizedUrl, strategies[0], locale);
-      const record = recordLighthouseRun(payload, { url: normalizedUrl, strategy: strategies[0], locale });
-      return res.json(serializeRun(record));
+    const previousAggregatedId = aggregatedRunsByUrl.get(normalizedUrl);
+    const baseVariants =
+      previousAggregatedId && aggregatedRuns.get(previousAggregatedId)
+        ? { ...aggregatedRuns.get(previousAggregatedId).variants }
+        : {};
+
+    const variants = { ...baseVariants };
+    for (const strategy of strategies) {
+      const payload = await fetchLegacyLighthouse(normalizedUrl, strategy, locale);
+      const record = createRunRecord(payload, { url: normalizedUrl, strategy, locale });
+      variants[strategy] = { record };
     }
-    const runs = await runStrategies({ url: normalizedUrl, locale, strategies });
-    return res.json({ ok: true, runs });
+
+    const aggregatedRecord = storeAggregatedRun({ url: normalizedUrl, locale, variants });
+    return res.json(formatAggregatedResponse(aggregatedRecord));
   } catch (error) {
     console.error("Lighthouse run error:", error);
     return res.status(500).json({ ok: false, error: error.message || "Failed to fetch from PSI API" });
@@ -213,55 +247,36 @@ app.get("/api/lighthouse-runs/latest", async (req, res) => {
   if (!normalizedUrl) {
     return res.status(400).json({ ok: false, error: "Missing URL" });
   }
-  const requestedStrategy = req.query?.strategy || req.query?.device;
-  const locale = normalizeLocale(req.query?.locale);
-  const strategies = requestedStrategy ? [normalizeStrategy(requestedStrategy)] : ["mobile", "desktop"];
-  try {
-    if (strategies.length === 1) {
-      const cacheKey = `${strategies[0]}:${normalizedUrl}`;
-      const cached = latestRuns.get(cacheKey);
-      if (cached) {
-        return res.json(serializeRun(cached));
-      }
-      const payload = await fetchLegacyLighthouse(normalizedUrl, strategies[0], locale);
-      const record = recordLighthouseRun(payload, { url: normalizedUrl, strategy: strategies[0], locale });
-      return res.json(serializeRun(record));
-    }
-    const cacheHits = {};
-    let cacheMiss = false;
-    strategies.forEach((strategy) => {
-      const cached = latestRuns.get(`${strategy}:${normalizedUrl}`);
-      if (cached) {
-        cacheHits[strategy] = serializeRun(cached);
-      } else {
-        cacheMiss = true;
-      }
-    });
-    if (!cacheMiss && Object.keys(cacheHits).length === strategies.length) {
-      return res.json({ ok: true, runs: cacheHits });
-    }
-    const runs = await runStrategies({ url: normalizedUrl, locale, strategies });
-    return res.json({ ok: true, runs });
-  } catch (error) {
-    console.error("Latest Lighthouse run error:", error);
-    return res.status(500).json({ ok: false, error: error.message || "Failed to fetch from PSI API" });
+  const aggregatedId = aggregatedRunsByUrl.get(normalizedUrl);
+  if (!aggregatedId) {
+    return res.status(404).json({ ok: false, error: "No Lighthouse runs found for this URL" });
   }
+  const aggregatedRecord = aggregatedRuns.get(aggregatedId);
+  if (!aggregatedRecord) {
+    return res.status(404).json({ ok: false, error: "Run not found" });
+  }
+  return res.json(formatAggregatedResponse(aggregatedRecord));
 });
 
 app.get("/api/lighthouse-runs/:runId/report", (req, res) => {
-  const run = lighthouseRuns.get(req.params.runId);
-  if (!run) {
+  const aggregatedRecord = aggregatedRuns.get(req.params.runId);
+  if (!aggregatedRecord) {
     return res.status(404).json({ ok: false, error: "Run not found" });
+  }
+  const device = normalizeStrategy(req.query?.device);
+  const variant = aggregatedRecord.variants[device] ?? aggregatedRecord.variants.mobile;
+  if (!variant?.record) {
+    return res.status(404).json({ ok: false, error: "Variant not found" });
   }
   const format = typeof req.query?.format === "string" ? req.query.format.toLowerCase() : "html";
   if (format === "json") {
-    return res.json(serializeRun(run));
+    return res.json(formatAggregatedResponse(aggregatedRecord));
   }
   if (format === "lhr") {
-    return res.json(run.lighthouse);
+    return res.json(variant.record.lighthouse);
   }
   try {
-    const html = renderReportHtml(run);
+    const html = renderReportHtml(variant.record);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     return res.send(html);
   } catch (error) {
