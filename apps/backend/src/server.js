@@ -12,7 +12,6 @@ const app = express();
 const ALLOWED_STRATEGIES = new Set(["mobile", "desktop"]);
 const PSI_ENDPOINT = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
 const lighthouseRuns = new Map();
-const reportGenerator = new ReportGenerator();
 
 const normalizeUrlInput = (value) => {
   if (typeof value !== "string") {
@@ -114,7 +113,7 @@ const renderReportHtml = (record) => {
   if (!record.lighthouse) {
     throw new Error("Run does not contain lighthouse data");
   }
-  return reportGenerator.generateReportHtml(record.lighthouse);
+  return ReportGenerator.generateReportHtml(record.lighthouse);
 };
 
 app.use(
