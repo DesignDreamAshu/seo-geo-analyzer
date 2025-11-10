@@ -4,6 +4,7 @@ import helmet from "helmet";
 import morgan from "morgan";
 import rateLimit from "express-rate-limit";
 import { randomUUID } from "node:crypto";
+import { ReportGenerator } from "lighthouse/report/generator/report-generator.js";
 import { config, isProduction } from "./config.js";
 import { runPageSpeedAudit, AuditError } from "./services/pageSpeed.js";
 
@@ -11,6 +12,7 @@ const app = express();
 const ALLOWED_STRATEGIES = new Set(["mobile", "desktop"]);
 const PSI_ENDPOINT = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
 const lighthouseRuns = new Map();
+const reportGenerator = new ReportGenerator();
 
 const normalizeUrlInput = (value) => {
   if (typeof value !== "string") {
@@ -108,65 +110,11 @@ const serializeRun = (record) => ({
   lighthouse: record.lighthouse,
 });
 
-const escapeHtml = (value = "") =>
-  String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-
-const renderReportHtml = (record, device) => {
-  const lighthouse = record.lighthouse ?? {};
-  const audits = lighthouse.audits ?? {};
-  const categories = lighthouse.categories ?? {};
-  const formatScore = (score) => (typeof score === "number" ? Math.round(score * 100) : "n/a");
-  const metricValue = (auditId) => audits[auditId]?.displayValue ?? "n/a";
-  const metrics = [
-    { label: "Performance Score", value: `${formatScore(categories.performance?.score)} / 100` },
-    { label: "Largest Contentful Paint", value: metricValue("largest-contentful-paint") },
-    { label: "Cumulative Layout Shift", value: metricValue("cumulative-layout-shift") },
-    { label: "Interaction to Next Paint", value: metricValue("interaction-to-next-paint") },
-    { label: "Total Blocking Time", value: metricValue("total-blocking-time") },
-    { label: "Speed Index", value: metricValue("speed-index") },
-  ];
-
-  const rows = metrics
-    .map(
-      (metric) => `
-        <tr>
-          <td>${escapeHtml(metric.label)}</td>
-          <td>${escapeHtml(metric.value)}</td>
-        </tr>
-      `,
-    )
-    .join("");
-
-  return `<!doctype html>
-  <html>
-    <head>
-      <meta charset="utf-8" />
-      <title>Lighthouse report for ${escapeHtml(record.url)}</title>
-      <style>
-        body { font-family: Arial, sans-serif; padding: 24px; background: #0f172a; color: #f8fafc; }
-        h1 { margin-top: 0; }
-        table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-        td { padding: 12px; border-bottom: 1px solid rgba(248, 250, 252, 0.1); }
-        .meta { margin-top: 8px; color: #94a3b8; }
-        .device { text-transform: uppercase; font-size: 0.8rem; letter-spacing: 0.1em; color: #a5b4fc; }
-      </style>
-    </head>
-    <body>
-      <p class="device">${escapeHtml(device || record.strategy || "mobile")}</p>
-      <h1>Lighthouse summary</h1>
-      <div class="meta">
-        <div>URL: ${escapeHtml(record.url)}</div>
-        <div>Run ID: ${escapeHtml(record.id)}</div>
-        <div>Created: ${escapeHtml(record.createdAt)}</div>
-      </div>
-      <table>${rows}</table>
-    </body>
-  </html>`;
+const renderReportHtml = (record) => {
+  if (!record.lighthouse) {
+    throw new Error("Run does not contain lighthouse data");
+  }
+  return reportGenerator.generateReportHtml(record.lighthouse);
 };
 
 app.use(
@@ -265,13 +213,21 @@ app.get("/api/lighthouse-runs/:runId/report", (req, res) => {
   if (!run) {
     return res.status(404).json({ ok: false, error: "Run not found" });
   }
-  const device = typeof req.query?.device === "string" ? req.query.device : run.strategy;
   const format = typeof req.query?.format === "string" ? req.query.format.toLowerCase() : "html";
   if (format === "json") {
     return res.json(serializeRun(run));
   }
-  res.setHeader("Content-Type", "text/html; charset=utf-8");
-  return res.send(renderReportHtml(run, device));
+  if (format === "lhr") {
+    return res.json(run.lighthouse);
+  }
+  try {
+    const html = renderReportHtml(run);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return res.send(html);
+  } catch (error) {
+    console.error("Failed to render Lighthouse report", error);
+    return res.status(500).json({ ok: false, error: "Unable to render report" });
+  }
 });
 
 app.use((_req, res) => {
