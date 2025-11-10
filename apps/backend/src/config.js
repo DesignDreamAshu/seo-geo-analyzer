@@ -21,7 +21,7 @@ const parseList = (value, fallback) => {
   return list.length ? list : fallback;
 };
 
-const DEFAULT_CORS = ["http://localhost:8080"];
+const DEFAULT_CORS = ["http://localhost:5173", "http://localhost:8080", "https://dream-seo-geo.netlify.app"];
 const DEFAULT_CATEGORIES = ["performance", "seo", "best-practices", "accessibility"];
 const DEFAULT_STRATEGY = "mobile";
 const resolvePsiApiKey = () => {
