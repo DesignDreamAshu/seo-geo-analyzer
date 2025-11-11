@@ -410,6 +410,10 @@ app.post("/api/recheck/:moduleId", async (req, res) => {
   });
 });
 
+app.get("/", (_req, res) => {
+  res.json({ status: "ok", service: "seo-geo-analyzer-api" });
+});
+
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
