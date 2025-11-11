@@ -1,12 +1,8 @@
-import "dotenv/config";
+import "tsx/esm";
 
-const bootstrap = async () => {
-  try {
-    await import("./src/server.js");
-  } catch (error) {
-    console.error("Failed to start backend server", error);
-    process.exit(1);
-  }
-};
+const entry = new URL("./src/index.ts", import.meta.url);
 
-bootstrap();
+import(entry).catch((error) => {
+  console.error("Failed to start backend via tsx runtime.", error);
+  process.exit(1);
+});

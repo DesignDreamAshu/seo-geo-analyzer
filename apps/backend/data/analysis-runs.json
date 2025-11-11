@@ -1,0 +1,3593 @@
+[
+  {
+    "id": "6QVjViUIaU9w",
+    "url": "https://dreamicons.app/",
+    "normalizedUrl": "https://dreamicons.app/",
+    "strategy": "mobile",
+    "locale": "en_IN",
+    "overall": 4.33,
+    "modules": [
+      {
+        "key": "performance",
+        "label": "Performance & Core Web Vitals",
+        "weight": 15,
+        "score": 5.5,
+        "summary": "PSI performance scored 55 out of 100.",
+        "recommendations": [
+          "Reduce Largest Contentful Paint below 2.5s with image and font optimizations."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "metrics": {
+            "lcp": 12818.535661241618,
+            "cls": 0.006372833371033769,
+            "inp": null,
+            "tbt": 462.5,
+            "perfScore": 0.55
+          },
+          "highlights": [
+            {
+              "label": "Performance Score",
+              "value": "55",
+              "status": "poor"
+            },
+            {
+              "label": "LCP",
+              "value": "12.82s",
+              "status": "poor"
+            },
+            {
+              "label": "CLS",
+              "value": "0.01",
+              "status": "good"
+            },
+            {
+              "label": "TBT",
+              "value": "463ms",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T08:38:07.057Z"
+      },
+      {
+        "key": "schema",
+        "label": "Schema & Structured Data",
+        "weight": 15,
+        "score": 2,
+        "summary": "No structured data detected on the scanned page.",
+        "recommendations": [
+          "Add JSON-LD markup describing key entities (WebSite, WebPage, Product, etc.).",
+          "Provide WebSite schema with SearchAction for better branded SERP coverage.",
+          "Add BreadcrumbList JSON-LD to improve sitelinks."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "schemas": [],
+          "highlights": [
+            {
+              "label": "Schemas detected",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Validator errors",
+              "value": "0",
+              "status": "good"
+            },
+            {
+              "label": "Warnings",
+              "value": "0",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T08:38:07.057Z"
+      },
+      {
+        "key": "geo",
+        "label": "GEO Localization & Hreflang",
+        "weight": 15,
+        "score": 0,
+        "summary": "0 hreflang entries detected; server geo differs from target market.",
+        "recommendations": [
+          "Add hreflang annotations to signal language/region variants.",
+          "Include xhtml:link alternates inside sitemap.xml for crawl efficiency.",
+          "Consider regional hosting/CDN POPs near target market."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "hreflangCount": 0,
+          "ccTld": null,
+          "highlights": [
+            {
+              "label": "Hreflang tags",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Sitemap alternates",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "ccTLD match",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Server region",
+              "value": "Unknown",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T08:38:07.057Z"
+      },
+      {
+        "key": "seo_basics",
+        "label": "SEO Basics",
+        "weight": 20,
+        "score": 6,
+        "summary": "Core on-page tags are mostly configured.",
+        "recommendations": [
+          "Keep the <title> tag between 30-60 characters.",
+          "Add a canonical tag."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 2,
+          "info": 0
+        },
+        "details": {
+          "title": "Home - Dream Icons",
+          "metaDescription": "Explore a vast collection of beautiful, customizable icons crafted for UI/UX designers, developers, and creatives. SVG, PNG, and web-ready formats.",
+          "indexable": true,
+          "highlights": [
+            {
+              "label": "Title length",
+              "value": "18",
+              "status": "good"
+            },
+            {
+              "label": "Meta description",
+              "value": "147",
+              "status": "good"
+            },
+            {
+              "label": "Canonical tags",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Indexable",
+              "value": "Yes",
+              "status": "good"
+            },
+            {
+              "label": "Sitemap reachable",
+              "value": "Yes",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T08:38:07.057Z"
+      },
+      {
+        "key": "social",
+        "label": "Social Preview",
+        "weight": 10,
+        "score": 1,
+        "summary": "Missing Open Graph metadata lowers share quality.",
+        "recommendations": [
+          "Populate og:title, og:description, and og:image for richer shares."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "highlights": [
+            {
+              "label": "OG title",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "OG description",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "OG image",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Twitter card",
+              "value": "summary_large_image",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T08:38:07.057Z"
+      },
+      {
+        "key": "security",
+        "label": "Security & Headers",
+        "weight": 10,
+        "score": 4,
+        "summary": "Core security headers look good.",
+        "recommendations": [
+          "Add Strict-Transport-Security header.",
+          "Add X-Content-Type-Options: nosniff.",
+          "Set X-Frame-Options DENY or a CSP frame-ancestors rule."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "https": true,
+          "hsts": false,
+          "mixedContent": 0,
+          "highlights": [
+            {
+              "label": "HSTS",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "NoSniff",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Frame protection",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Mixed content refs",
+              "value": "0",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T08:38:07.057Z"
+      },
+      {
+        "key": "accessibility",
+        "label": "Accessibility Lite",
+        "weight": 10,
+        "score": 10,
+        "summary": "Alt coverage at 100%.",
+        "recommendations": [],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "totalImages": 9,
+          "imagesWithAlt": 9,
+          "hasLandmark": true,
+          "highlights": [
+            {
+              "label": "Images with alt",
+              "value": "9/9",
+              "status": "good"
+            },
+            {
+              "label": "Landmarks present",
+              "value": "Yes",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T08:38:07.057Z"
+      },
+      {
+        "key": "links",
+        "label": "Links & Indexability",
+        "weight": 5,
+        "score": 10,
+        "summary": "Sampled links healthy.",
+        "recommendations": [],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "totalSampled": 11,
+          "brokenSample": [],
+          "highlights": [
+            {
+              "label": "Links sampled",
+              "value": "11",
+              "status": "good"
+            },
+            {
+              "label": "Broken links",
+              "value": "0",
+              "status": "good"
+            },
+            {
+              "label": "Nofollow ratio",
+              "value": "0%",
+              "status": "good"
+            },
+            {
+              "label": "Indexable",
+              "value": "Yes",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T08:38:07.057Z"
+      }
+    ],
+    "createdAt": "2025-11-11T08:38:07.135Z"
+  },
+  {
+    "id": "uG21uzZnHeE4",
+    "url": "https://dreamicons.app/",
+    "normalizedUrl": "https://dreamicons.app/",
+    "strategy": "mobile",
+    "locale": "en_IN",
+    "overall": 4.28,
+    "modules": [
+      {
+        "key": "performance",
+        "label": "Performance & Core Web Vitals",
+        "weight": 15,
+        "score": 5.2,
+        "summary": "PSI performance scored 52 out of 100.",
+        "recommendations": [
+          "Reduce Largest Contentful Paint below 2.5s with image and font optimizations."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "metrics": {
+            "lcp": 12086.555586988612,
+            "cls": 0.006372833371033769,
+            "inp": null,
+            "tbt": 591.5,
+            "perfScore": 0.52
+          },
+          "highlights": [
+            {
+              "label": "Performance Score",
+              "value": "52",
+              "status": "poor"
+            },
+            {
+              "label": "LCP",
+              "value": "12.09s",
+              "status": "poor"
+            },
+            {
+              "label": "CLS",
+              "value": "0.01",
+              "status": "good"
+            },
+            {
+              "label": "TBT",
+              "value": "592ms",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T08:48:15.503Z"
+      },
+      {
+        "key": "schema",
+        "label": "Schema & Structured Data",
+        "weight": 15,
+        "score": 2,
+        "summary": "No structured data detected on the scanned page.",
+        "recommendations": [
+          "Add JSON-LD markup describing key entities (WebSite, WebPage, Product, etc.).",
+          "Provide WebSite schema with SearchAction for better branded SERP coverage.",
+          "Add BreadcrumbList JSON-LD to improve sitelinks."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "schemas": [],
+          "highlights": [
+            {
+              "label": "Schemas detected",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Validator errors",
+              "value": "0",
+              "status": "good"
+            },
+            {
+              "label": "Warnings",
+              "value": "0",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T08:48:15.503Z"
+      },
+      {
+        "key": "geo",
+        "label": "GEO Localization & Hreflang",
+        "weight": 15,
+        "score": 0,
+        "summary": "0 hreflang entries detected; server geo differs from target market.",
+        "recommendations": [
+          "Add hreflang annotations to signal language/region variants.",
+          "Include xhtml:link alternates inside sitemap.xml for crawl efficiency.",
+          "Consider regional hosting/CDN POPs near target market."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "hreflangCount": 0,
+          "ccTld": null,
+          "highlights": [
+            {
+              "label": "Hreflang tags",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Sitemap alternates",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "ccTLD match",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Server region",
+              "value": "Unknown",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T08:48:15.503Z"
+      },
+      {
+        "key": "seo_basics",
+        "label": "SEO Basics",
+        "weight": 20,
+        "score": 6,
+        "summary": "Core on-page tags are mostly configured.",
+        "recommendations": [
+          "Keep the <title> tag between 30-60 characters.",
+          "Add a canonical tag."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 2,
+          "info": 0
+        },
+        "details": {
+          "title": "Home - Dream Icons",
+          "metaDescription": "Explore a vast collection of beautiful, customizable icons crafted for UI/UX designers, developers, and creatives. SVG, PNG, and web-ready formats.",
+          "indexable": true,
+          "highlights": [
+            {
+              "label": "Title length",
+              "value": "18",
+              "status": "good"
+            },
+            {
+              "label": "Meta description",
+              "value": "147",
+              "status": "good"
+            },
+            {
+              "label": "Canonical tags",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Indexable",
+              "value": "Yes",
+              "status": "good"
+            },
+            {
+              "label": "Sitemap reachable",
+              "value": "Yes",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T08:48:15.503Z"
+      },
+      {
+        "key": "social",
+        "label": "Social Preview",
+        "weight": 10,
+        "score": 1,
+        "summary": "Missing Open Graph metadata lowers share quality.",
+        "recommendations": [
+          "Populate og:title, og:description, and og:image for richer shares."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "highlights": [
+            {
+              "label": "OG title",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "OG description",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "OG image",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Twitter card",
+              "value": "summary_large_image",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T08:48:15.503Z"
+      },
+      {
+        "key": "security",
+        "label": "Security & Headers",
+        "weight": 10,
+        "score": 4,
+        "summary": "Core security headers look good.",
+        "recommendations": [
+          "Add Strict-Transport-Security header.",
+          "Add X-Content-Type-Options: nosniff.",
+          "Set X-Frame-Options DENY or a CSP frame-ancestors rule."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "https": true,
+          "hsts": false,
+          "mixedContent": 0,
+          "highlights": [
+            {
+              "label": "HSTS",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "NoSniff",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Frame protection",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Mixed content refs",
+              "value": "0",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T08:48:15.503Z"
+      },
+      {
+        "key": "accessibility",
+        "label": "Accessibility Lite",
+        "weight": 10,
+        "score": 10,
+        "summary": "Alt coverage at 100%.",
+        "recommendations": [],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "totalImages": 9,
+          "imagesWithAlt": 9,
+          "hasLandmark": true,
+          "highlights": [
+            {
+              "label": "Images with alt",
+              "value": "9/9",
+              "status": "good"
+            },
+            {
+              "label": "Landmarks present",
+              "value": "Yes",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T08:48:15.503Z"
+      },
+      {
+        "key": "links",
+        "label": "Links & Indexability",
+        "weight": 5,
+        "score": 10,
+        "summary": "Sampled links healthy.",
+        "recommendations": [],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "totalSampled": 11,
+          "brokenSample": [],
+          "highlights": [
+            {
+              "label": "Links sampled",
+              "value": "11",
+              "status": "good"
+            },
+            {
+              "label": "Broken links",
+              "value": "0",
+              "status": "good"
+            },
+            {
+              "label": "Nofollow ratio",
+              "value": "0%",
+              "status": "good"
+            },
+            {
+              "label": "Indexable",
+              "value": "Yes",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T08:48:15.503Z"
+      }
+    ],
+    "createdAt": "2025-11-11T08:48:15.547Z"
+  },
+  {
+    "id": "-77y8ex9d1Bv",
+    "url": "https://dreamicons.app/",
+    "normalizedUrl": "https://dreamicons.app/",
+    "strategy": "mobile",
+    "locale": "en_IN",
+    "overall": 4.34,
+    "modules": [
+      {
+        "key": "performance",
+        "label": "Performance & Core Web Vitals",
+        "weight": 15,
+        "score": 5.6,
+        "summary": "PSI performance scored 56 out of 100.",
+        "recommendations": [
+          "Reduce Largest Contentful Paint below 2.5s with image and font optimizations."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "metrics": {
+            "lcp": 12834.519583720332,
+            "cls": 0.006372833371033769,
+            "inp": null,
+            "tbt": 463,
+            "perfScore": 0.56
+          },
+          "highlights": [
+            {
+              "label": "Performance Score",
+              "value": "56",
+              "status": "poor"
+            },
+            {
+              "label": "LCP",
+              "value": "12.83s",
+              "status": "poor"
+            },
+            {
+              "label": "CLS",
+              "value": "0.01",
+              "status": "good"
+            },
+            {
+              "label": "TBT",
+              "value": "463ms",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:20:13.110Z"
+      },
+      {
+        "key": "schema",
+        "label": "Schema & Structured Data",
+        "weight": 15,
+        "score": 2,
+        "summary": "No structured data detected on the scanned page.",
+        "recommendations": [
+          "Add JSON-LD markup describing key entities (WebSite, WebPage, Product, etc.).",
+          "Provide WebSite schema with SearchAction for better branded SERP coverage.",
+          "Add BreadcrumbList JSON-LD to improve sitelinks."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "schemas": [],
+          "highlights": [
+            {
+              "label": "Schemas detected",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Validator errors",
+              "value": "0",
+              "status": "good"
+            },
+            {
+              "label": "Warnings",
+              "value": "0",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:20:13.110Z"
+      },
+      {
+        "key": "geo",
+        "label": "GEO Localization & Hreflang",
+        "weight": 15,
+        "score": 0,
+        "summary": "0 hreflang entries detected; server geo differs from target market.",
+        "recommendations": [
+          "Add hreflang annotations to signal language/region variants.",
+          "Include xhtml:link alternates inside sitemap.xml for crawl efficiency.",
+          "Consider regional hosting/CDN POPs near target market."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "hreflangCount": 0,
+          "ccTld": null,
+          "highlights": [
+            {
+              "label": "Hreflang tags",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Sitemap alternates",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "ccTLD match",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Server region",
+              "value": "Unknown",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:20:13.110Z"
+      },
+      {
+        "key": "seo_basics",
+        "label": "SEO Basics",
+        "weight": 20,
+        "score": 6,
+        "summary": "Core on-page tags are mostly configured.",
+        "recommendations": [
+          "Keep the <title> tag between 30-60 characters.",
+          "Add a canonical tag."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 2,
+          "info": 0
+        },
+        "details": {
+          "title": "Home - Dream Icons",
+          "metaDescription": "Explore a vast collection of beautiful, customizable icons crafted for UI/UX designers, developers, and creatives. SVG, PNG, and web-ready formats.",
+          "indexable": true,
+          "highlights": [
+            {
+              "label": "Title length",
+              "value": "18",
+              "status": "good"
+            },
+            {
+              "label": "Meta description",
+              "value": "147",
+              "status": "good"
+            },
+            {
+              "label": "Canonical tags",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Indexable",
+              "value": "Yes",
+              "status": "good"
+            },
+            {
+              "label": "Sitemap reachable",
+              "value": "Yes",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:20:13.110Z"
+      },
+      {
+        "key": "social",
+        "label": "Social Preview",
+        "weight": 10,
+        "score": 1,
+        "summary": "Missing Open Graph metadata lowers share quality.",
+        "recommendations": [
+          "Populate og:title, og:description, and og:image for richer shares."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "highlights": [
+            {
+              "label": "OG title",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "OG description",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "OG image",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Twitter card",
+              "value": "summary_large_image",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:20:13.110Z"
+      },
+      {
+        "key": "security",
+        "label": "Security & Headers",
+        "weight": 10,
+        "score": 4,
+        "summary": "Core security headers look good.",
+        "recommendations": [
+          "Add Strict-Transport-Security header.",
+          "Add X-Content-Type-Options: nosniff.",
+          "Set X-Frame-Options DENY or a CSP frame-ancestors rule."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "https": true,
+          "hsts": false,
+          "mixedContent": 0,
+          "highlights": [
+            {
+              "label": "HSTS",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "NoSniff",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Frame protection",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Mixed content refs",
+              "value": "0",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:20:13.110Z"
+      },
+      {
+        "key": "accessibility",
+        "label": "Accessibility Lite",
+        "weight": 10,
+        "score": 10,
+        "summary": "Alt coverage at 100%.",
+        "recommendations": [],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "totalImages": 9,
+          "imagesWithAlt": 9,
+          "hasLandmark": true,
+          "highlights": [
+            {
+              "label": "Images with alt",
+              "value": "9/9",
+              "status": "good"
+            },
+            {
+              "label": "Landmarks present",
+              "value": "Yes",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:20:13.110Z"
+      },
+      {
+        "key": "links",
+        "label": "Links & Indexability",
+        "weight": 5,
+        "score": 10,
+        "summary": "Sampled links healthy.",
+        "recommendations": [],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "totalSampled": 11,
+          "brokenSample": [],
+          "highlights": [
+            {
+              "label": "Links sampled",
+              "value": "11",
+              "status": "good"
+            },
+            {
+              "label": "Broken links",
+              "value": "0",
+              "status": "good"
+            },
+            {
+              "label": "Nofollow ratio",
+              "value": "0%",
+              "status": "good"
+            },
+            {
+              "label": "Indexable",
+              "value": "Yes",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:20:13.110Z"
+      }
+    ],
+    "createdAt": "2025-11-11T10:20:13.240Z"
+  },
+  {
+    "id": "TvbyEOI3m-Ko",
+    "url": "https://dreamicons.app/",
+    "normalizedUrl": "https://dreamicons.app/",
+    "strategy": "mobile",
+    "locale": "en_IN",
+    "overall": 3.59,
+    "modules": [
+      {
+        "key": "performance",
+        "label": "Performance & Core Web Vitals",
+        "weight": 15,
+        "score": 5.1,
+        "summary": "PSI performance scored 51 out of 100.",
+        "recommendations": [
+          "Reduce Largest Contentful Paint below 2.5s with image and font optimizations.",
+          "Lower Total Blocking Time with code splitting and async loading."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 2,
+          "info": 0
+        },
+        "details": {
+          "metrics": {
+            "lcp": 12545.550485428314,
+            "cls": 0.006372833371033769,
+            "inp": null,
+            "tbt": 614.5,
+            "perfScore": 0.51
+          },
+          "highlights": [
+            {
+              "label": "Performance Score",
+              "value": "51",
+              "status": "poor"
+            },
+            {
+              "label": "LCP",
+              "value": "12.55s",
+              "status": "poor"
+            },
+            {
+              "label": "CLS",
+              "value": "0.01",
+              "status": "good"
+            },
+            {
+              "label": "TBT",
+              "value": "615ms",
+              "status": "poor"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:34:10.203Z"
+      },
+      {
+        "key": "schema",
+        "label": "Schema & Structured Data",
+        "weight": 15,
+        "score": 2,
+        "summary": "No structured data detected on the scanned page.",
+        "recommendations": [
+          "Add JSON-LD markup describing key entities (WebSite, WebPage, Product, etc.).",
+          "Provide WebSite schema with SearchAction for better branded SERP coverage.",
+          "Add BreadcrumbList JSON-LD to improve sitelinks."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "schemas": [],
+          "highlights": [
+            {
+              "label": "Schemas detected",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Validator errors",
+              "value": "0",
+              "status": "good"
+            },
+            {
+              "label": "Warnings",
+              "value": "0",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:34:10.203Z"
+      },
+      {
+        "key": "geo",
+        "label": "GEO Localization & Hreflang",
+        "weight": 15,
+        "score": 0,
+        "summary": "0 hreflang entries detected; server geo differs from target market.",
+        "recommendations": [
+          "Add hreflang annotations to signal language/region variants.",
+          "Include xhtml:link alternates inside sitemap.xml for crawl efficiency.",
+          "Consider regional hosting/CDN POPs near target market."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "hreflangCount": 0,
+          "ccTld": null,
+          "highlights": [
+            {
+              "label": "Hreflang tags",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Sitemap alternates",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "ccTLD match",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Server region",
+              "value": "Unknown",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:34:10.203Z"
+      },
+      {
+        "key": "seo_basics",
+        "label": "SEO Basics",
+        "weight": 20,
+        "score": 4,
+        "summary": "Core on-page tags are mostly configured.",
+        "recommendations": [
+          "Keep the <title> tag between 30-60 characters.",
+          "Add a canonical tag.",
+          "Ensure sitemap.xml is accessible and referenced in robots.txt."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 2,
+          "info": 0
+        },
+        "details": {
+          "title": "Home - Dream Icons",
+          "metaDescription": "Explore a vast collection of beautiful, customizable icons crafted for UI/UX designers, developers, and creatives. SVG, PNG, and web-ready formats.",
+          "indexable": true,
+          "highlights": [
+            {
+              "label": "Title length",
+              "value": "18",
+              "status": "good"
+            },
+            {
+              "label": "Meta description",
+              "value": "147",
+              "status": "good"
+            },
+            {
+              "label": "Canonical tags",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Indexable",
+              "value": "Yes",
+              "status": "good"
+            },
+            {
+              "label": "Sitemap reachable",
+              "value": "No",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:34:10.203Z"
+      },
+      {
+        "key": "social",
+        "label": "Social Preview",
+        "weight": 10,
+        "score": 1,
+        "summary": "Missing Open Graph metadata lowers share quality.",
+        "recommendations": [
+          "Populate og:title, og:description, and og:image for richer shares."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "highlights": [
+            {
+              "label": "OG title",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "OG description",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "OG image",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Twitter card",
+              "value": "summary_large_image",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:34:10.203Z"
+      },
+      {
+        "key": "security",
+        "label": "Security & Headers",
+        "weight": 10,
+        "score": 4,
+        "summary": "Core security headers look good.",
+        "recommendations": [
+          "Add Strict-Transport-Security header.",
+          "Add X-Content-Type-Options: nosniff.",
+          "Set X-Frame-Options DENY or a CSP frame-ancestors rule."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "https": true,
+          "hsts": false,
+          "mixedContent": 0,
+          "highlights": [
+            {
+              "label": "HSTS",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "NoSniff",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Frame protection",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Mixed content refs",
+              "value": "0",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:34:10.203Z"
+      },
+      {
+        "key": "accessibility",
+        "label": "Accessibility Lite",
+        "weight": 10,
+        "score": 10,
+        "summary": "Alt coverage at 100%.",
+        "recommendations": [],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "totalImages": 9,
+          "imagesWithAlt": 9,
+          "missingAltSample": [],
+          "landmarksDetected": [
+            "main",
+            "nav",
+            "header",
+            "footer"
+          ],
+          "highlights": [
+            {
+              "label": "Images with alt",
+              "value": "9/9",
+              "status": "good"
+            },
+            {
+              "label": "Landmark types",
+              "value": "4",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:34:10.203Z"
+      },
+      {
+        "key": "links",
+        "label": "Links & Indexability",
+        "weight": 5,
+        "score": 4.545454545454546,
+        "summary": "6 of 11 sampled links failed.",
+        "recommendations": [
+          "6 sampled links returned errors; fix or remove broken URLs."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "totalSampled": 11,
+          "brokenSample": [
+            {
+              "url": "https://dreamicons.app/webapp",
+              "statusCode": null,
+              "ok": false
+            },
+            {
+              "url": "https://dreamicons.app/icon-request",
+              "statusCode": null,
+              "ok": false,
+              "rel": "noopener"
+            },
+            {
+              "url": "https://dreamicons.app/cancellation/",
+              "statusCode": null,
+              "ok": false
+            },
+            {
+              "url": "https://dreamicons.app/terms-of-service/",
+              "statusCode": null,
+              "ok": false
+            },
+            {
+              "url": "https://dreamicons.app/privacy-policy/",
+              "statusCode": null,
+              "ok": false
+            }
+          ],
+          "nofollowRatio": 0,
+          "highlights": [
+            {
+              "label": "Links sampled",
+              "value": "11",
+              "status": "good"
+            },
+            {
+              "label": "Broken links",
+              "value": "6",
+              "status": "warn"
+            },
+            {
+              "label": "Nofollow ratio",
+              "value": "0%",
+              "status": "good"
+            },
+            {
+              "label": "Indexable",
+              "value": "Yes",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:34:10.203Z"
+      }
+    ],
+    "createdAt": "2025-11-11T10:34:10.373Z"
+  },
+  {
+    "id": "KoBGEeSeqA1f",
+    "url": "https://dreamicons.app/",
+    "normalizedUrl": "https://dreamicons.app/",
+    "strategy": "mobile",
+    "locale": "en_IN",
+    "overall": 4.26,
+    "modules": [
+      {
+        "key": "performance",
+        "label": "Performance & Core Web Vitals",
+        "weight": 15,
+        "score": 5.1,
+        "summary": "PSI performance scored 51 out of 100.",
+        "recommendations": [
+          "Reduce Largest Contentful Paint below 2.5s with image and font optimizations.",
+          "Lower Total Blocking Time with code splitting and async loading."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 2,
+          "info": 0
+        },
+        "details": {
+          "metrics": {
+            "lcp": 12530.074548256322,
+            "cls": 0.006372833371033769,
+            "inp": null,
+            "tbt": 616,
+            "perfScore": 0.51
+          },
+          "highlights": [
+            {
+              "label": "Performance Score",
+              "value": "51",
+              "status": "poor"
+            },
+            {
+              "label": "LCP",
+              "value": "12.53s",
+              "status": "poor"
+            },
+            {
+              "label": "CLS",
+              "value": "0.01",
+              "status": "good"
+            },
+            {
+              "label": "TBT",
+              "value": "616ms",
+              "status": "poor"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:42:05.119Z"
+      },
+      {
+        "key": "schema",
+        "label": "Schema & Structured Data",
+        "weight": 15,
+        "score": 2,
+        "summary": "No structured data detected on the scanned page.",
+        "recommendations": [
+          "Add JSON-LD markup describing key entities (WebSite, WebPage, Product, etc.).",
+          "Provide WebSite schema with SearchAction for better branded SERP coverage.",
+          "Add BreadcrumbList JSON-LD to improve sitelinks."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "schemas": [],
+          "highlights": [
+            {
+              "label": "Schemas detected",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Validator errors",
+              "value": "0",
+              "status": "good"
+            },
+            {
+              "label": "Warnings",
+              "value": "0",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:42:05.119Z"
+      },
+      {
+        "key": "geo",
+        "label": "GEO Localization & Hreflang",
+        "weight": 15,
+        "score": 0,
+        "summary": "0 hreflang entries detected; server geo differs from target market.",
+        "recommendations": [
+          "Add hreflang annotations to signal language/region variants.",
+          "Include xhtml:link alternates inside sitemap.xml for crawl efficiency.",
+          "Consider regional hosting/CDN POPs near target market."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "hreflangCount": 0,
+          "ccTld": null,
+          "highlights": [
+            {
+              "label": "Hreflang tags",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Sitemap alternates",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "ccTLD match",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Server region",
+              "value": "Unknown",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:42:05.119Z"
+      },
+      {
+        "key": "seo_basics",
+        "label": "SEO Basics",
+        "weight": 20,
+        "score": 6,
+        "summary": "Core on-page tags are mostly configured.",
+        "recommendations": [
+          "Keep the <title> tag between 30-60 characters.",
+          "Add a canonical tag."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 2,
+          "info": 0
+        },
+        "details": {
+          "title": "Home - Dream Icons",
+          "metaDescription": "Explore a vast collection of beautiful, customizable icons crafted for UI/UX designers, developers, and creatives. SVG, PNG, and web-ready formats.",
+          "indexable": true,
+          "highlights": [
+            {
+              "label": "Title length",
+              "value": "18",
+              "status": "good"
+            },
+            {
+              "label": "Meta description",
+              "value": "147",
+              "status": "good"
+            },
+            {
+              "label": "Canonical tags",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Indexable",
+              "value": "Yes",
+              "status": "good"
+            },
+            {
+              "label": "Sitemap reachable",
+              "value": "Yes",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:42:05.119Z"
+      },
+      {
+        "key": "social",
+        "label": "Social Preview",
+        "weight": 10,
+        "score": 1,
+        "summary": "Missing Open Graph metadata lowers share quality.",
+        "recommendations": [
+          "Populate og:title, og:description, and og:image for richer shares."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "highlights": [
+            {
+              "label": "OG title",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "OG description",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "OG image",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Twitter card",
+              "value": "summary_large_image",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:42:05.119Z"
+      },
+      {
+        "key": "security",
+        "label": "Security & Headers",
+        "weight": 10,
+        "score": 4,
+        "summary": "Core security headers look good.",
+        "recommendations": [
+          "Add Strict-Transport-Security header.",
+          "Add X-Content-Type-Options: nosniff.",
+          "Set X-Frame-Options DENY or a CSP frame-ancestors rule."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "https": true,
+          "hsts": false,
+          "mixedContent": 0,
+          "highlights": [
+            {
+              "label": "HSTS",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "NoSniff",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Frame protection",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Mixed content refs",
+              "value": "0",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:42:05.119Z"
+      },
+      {
+        "key": "accessibility",
+        "label": "Accessibility Lite",
+        "weight": 10,
+        "score": 10,
+        "summary": "Alt coverage at 100%.",
+        "recommendations": [],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "totalImages": 9,
+          "imagesWithAlt": 9,
+          "missingAltSample": [],
+          "landmarksDetected": [
+            "main",
+            "nav",
+            "header",
+            "footer"
+          ],
+          "highlights": [
+            {
+              "label": "Images with alt",
+              "value": "9/9",
+              "status": "good"
+            },
+            {
+              "label": "Landmark types",
+              "value": "4",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:42:05.119Z"
+      },
+      {
+        "key": "links",
+        "label": "Links & Indexability",
+        "weight": 5,
+        "score": 10,
+        "summary": "Sampled links healthy.",
+        "recommendations": [],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "totalSampled": 11,
+          "brokenSample": [],
+          "nofollowRatio": 0,
+          "highlights": [
+            {
+              "label": "Links sampled",
+              "value": "11",
+              "status": "good"
+            },
+            {
+              "label": "Broken links",
+              "value": "0",
+              "status": "good"
+            },
+            {
+              "label": "Nofollow ratio",
+              "value": "0%",
+              "status": "good"
+            },
+            {
+              "label": "Indexable",
+              "value": "Yes",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:42:05.119Z"
+      }
+    ],
+    "createdAt": "2025-11-11T10:42:05.267Z"
+  },
+  {
+    "id": "6S0V4QrfBsjF",
+    "url": "https://dreamicons.app/",
+    "normalizedUrl": "https://dreamicons.app/",
+    "strategy": "mobile",
+    "locale": "en_IN",
+    "overall": 4.26,
+    "modules": [
+      {
+        "key": "performance",
+        "label": "Performance & Core Web Vitals",
+        "weight": 15,
+        "score": 5.1,
+        "summary": "PSI performance scored 51 out of 100.",
+        "recommendations": [
+          "Reduce Largest Contentful Paint below 2.5s with image and font optimizations.",
+          "Lower Total Blocking Time with code splitting and async loading."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 2,
+          "info": 0
+        },
+        "details": {
+          "metrics": {
+            "lcp": 12530.074548256322,
+            "cls": 0.006372833371033769,
+            "inp": null,
+            "tbt": 616,
+            "perfScore": 0.51
+          },
+          "highlights": [
+            {
+              "label": "Performance Score",
+              "value": "51",
+              "status": "poor"
+            },
+            {
+              "label": "LCP",
+              "value": "12.53s",
+              "status": "poor"
+            },
+            {
+              "label": "CLS",
+              "value": "0.01",
+              "status": "good"
+            },
+            {
+              "label": "TBT",
+              "value": "616ms",
+              "status": "poor"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:42:47.541Z"
+      },
+      {
+        "key": "schema",
+        "label": "Schema & Structured Data",
+        "weight": 15,
+        "score": 2,
+        "summary": "No structured data detected on the scanned page.",
+        "recommendations": [
+          "Add JSON-LD markup describing key entities (WebSite, WebPage, Product, etc.).",
+          "Provide WebSite schema with SearchAction for better branded SERP coverage.",
+          "Add BreadcrumbList JSON-LD to improve sitelinks."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "schemas": [],
+          "highlights": [
+            {
+              "label": "Schemas detected",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Validator errors",
+              "value": "0",
+              "status": "good"
+            },
+            {
+              "label": "Warnings",
+              "value": "0",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:42:47.541Z"
+      },
+      {
+        "key": "geo",
+        "label": "GEO Localization & Hreflang",
+        "weight": 15,
+        "score": 0,
+        "summary": "0 hreflang entries detected; server geo differs from target market.",
+        "recommendations": [
+          "Add hreflang annotations to signal language/region variants.",
+          "Include xhtml:link alternates inside sitemap.xml for crawl efficiency.",
+          "Consider regional hosting/CDN POPs near target market."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "hreflangCount": 0,
+          "ccTld": null,
+          "highlights": [
+            {
+              "label": "Hreflang tags",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Sitemap alternates",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "ccTLD match",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Server region",
+              "value": "Unknown",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:42:47.541Z"
+      },
+      {
+        "key": "seo_basics",
+        "label": "SEO Basics",
+        "weight": 20,
+        "score": 6,
+        "summary": "Core on-page tags are mostly configured.",
+        "recommendations": [
+          "Keep the <title> tag between 30-60 characters.",
+          "Add a canonical tag."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 2,
+          "info": 0
+        },
+        "details": {
+          "title": "Home - Dream Icons",
+          "metaDescription": "Explore a vast collection of beautiful, customizable icons crafted for UI/UX designers, developers, and creatives. SVG, PNG, and web-ready formats.",
+          "indexable": true,
+          "highlights": [
+            {
+              "label": "Title length",
+              "value": "18",
+              "status": "good"
+            },
+            {
+              "label": "Meta description",
+              "value": "147",
+              "status": "good"
+            },
+            {
+              "label": "Canonical tags",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Indexable",
+              "value": "Yes",
+              "status": "good"
+            },
+            {
+              "label": "Sitemap reachable",
+              "value": "Yes",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:42:47.541Z"
+      },
+      {
+        "key": "social",
+        "label": "Social Preview",
+        "weight": 10,
+        "score": 1,
+        "summary": "Missing Open Graph metadata lowers share quality.",
+        "recommendations": [
+          "Populate og:title, og:description, and og:image for richer shares."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "highlights": [
+            {
+              "label": "OG title",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "OG description",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "OG image",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Twitter card",
+              "value": "summary_large_image",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:42:47.541Z"
+      },
+      {
+        "key": "security",
+        "label": "Security & Headers",
+        "weight": 10,
+        "score": 4,
+        "summary": "Core security headers look good.",
+        "recommendations": [
+          "Add Strict-Transport-Security header.",
+          "Add X-Content-Type-Options: nosniff.",
+          "Set X-Frame-Options DENY or a CSP frame-ancestors rule."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "https": true,
+          "hsts": false,
+          "mixedContent": 0,
+          "highlights": [
+            {
+              "label": "HSTS",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "NoSniff",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Frame protection",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Mixed content refs",
+              "value": "0",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:42:47.541Z"
+      },
+      {
+        "key": "accessibility",
+        "label": "Accessibility Lite",
+        "weight": 10,
+        "score": 10,
+        "summary": "Alt coverage at 100%.",
+        "recommendations": [],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "totalImages": 9,
+          "imagesWithAlt": 9,
+          "missingAltSample": [],
+          "landmarksDetected": [
+            "main",
+            "nav",
+            "header",
+            "footer"
+          ],
+          "highlights": [
+            {
+              "label": "Images with alt",
+              "value": "9/9",
+              "status": "good"
+            },
+            {
+              "label": "Landmark types",
+              "value": "4",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:42:47.541Z"
+      },
+      {
+        "key": "links",
+        "label": "Links & Indexability",
+        "weight": 5,
+        "score": 10,
+        "summary": "Sampled links healthy.",
+        "recommendations": [],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "totalSampled": 11,
+          "brokenSample": [],
+          "nofollowRatio": 0,
+          "highlights": [
+            {
+              "label": "Links sampled",
+              "value": "11",
+              "status": "good"
+            },
+            {
+              "label": "Broken links",
+              "value": "0",
+              "status": "good"
+            },
+            {
+              "label": "Nofollow ratio",
+              "value": "0%",
+              "status": "good"
+            },
+            {
+              "label": "Indexable",
+              "value": "Yes",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:42:47.541Z"
+      }
+    ],
+    "createdAt": "2025-11-11T10:42:47.665Z"
+  },
+  {
+    "id": "s2i6VdVQQd7t",
+    "url": "https://dribbble.com/",
+    "normalizedUrl": "https://dribbble.com/",
+    "strategy": "mobile",
+    "locale": "en_IN",
+    "overall": 3.84,
+    "modules": [
+      {
+        "key": "performance",
+        "label": "Performance & Core Web Vitals",
+        "weight": 15,
+        "score": 5.6,
+        "summary": "PSI performance scored 56 out of 100.",
+        "recommendations": [
+          "Reduce Largest Contentful Paint below 2.5s with image and font optimizations."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "metrics": {
+            "lcp": 6377.01369544189,
+            "cls": 0,
+            "inp": null,
+            "tbt": 396.4999999999991,
+            "perfScore": 0.56
+          },
+          "highlights": [
+            {
+              "label": "Performance Score",
+              "value": "56",
+              "status": "poor"
+            },
+            {
+              "label": "LCP",
+              "value": "6.38s",
+              "status": "poor"
+            },
+            {
+              "label": "CLS",
+              "value": "0.00",
+              "status": "poor"
+            },
+            {
+              "label": "TBT",
+              "value": "396ms",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:44:02.168Z"
+      },
+      {
+        "key": "schema",
+        "label": "Schema & Structured Data",
+        "weight": 15,
+        "score": 2,
+        "summary": "No structured data detected on the scanned page.",
+        "recommendations": [
+          "Add JSON-LD markup describing key entities (WebSite, WebPage, Product, etc.).",
+          "Provide WebSite schema with SearchAction for better branded SERP coverage.",
+          "Add BreadcrumbList JSON-LD to improve sitelinks."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "schemas": [],
+          "highlights": [
+            {
+              "label": "Schemas detected",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Validator errors",
+              "value": "0",
+              "status": "good"
+            },
+            {
+              "label": "Warnings",
+              "value": "0",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:44:02.168Z"
+      },
+      {
+        "key": "geo",
+        "label": "GEO Localization & Hreflang",
+        "weight": 15,
+        "score": 0,
+        "summary": "0 hreflang entries detected; server geo differs from target market.",
+        "recommendations": [
+          "Add hreflang annotations to signal language/region variants.",
+          "Include xhtml:link alternates inside sitemap.xml for crawl efficiency.",
+          "Consider regional hosting/CDN POPs near target market."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "hreflangCount": 0,
+          "ccTld": null,
+          "highlights": [
+            {
+              "label": "Hreflang tags",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Sitemap alternates",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "ccTLD match",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Server region",
+              "value": "Unknown",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:44:02.168Z"
+      },
+      {
+        "key": "seo_basics",
+        "label": "SEO Basics",
+        "weight": 20,
+        "score": 2,
+        "summary": "Core on-page tags are mostly configured.",
+        "recommendations": [
+          "Keep the <title> tag between 30-60 characters.",
+          "Meta description should be 70-160 characters describing the page intent.",
+          "Add a canonical tag.",
+          "Ensure sitemap.xml is accessible and referenced in robots.txt."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 2,
+          "info": 0
+        },
+        "details": {
+          "title": "Dribbble - Discover the World’s Top Designers & Creative Professionals",
+          "metaDescription": "Find Top Designers & Creative Professionals on Dribbble. We are where designers gain inspiration, feedback, community, and jobs. Your best resource to discover and connect with designers worldwide.",
+          "indexable": true,
+          "highlights": [
+            {
+              "label": "Title length",
+              "value": "70",
+              "status": "good"
+            },
+            {
+              "label": "Meta description",
+              "value": "197",
+              "status": "good"
+            },
+            {
+              "label": "Canonical tags",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Indexable",
+              "value": "Yes",
+              "status": "good"
+            },
+            {
+              "label": "Sitemap reachable",
+              "value": "No",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:44:02.168Z"
+      },
+      {
+        "key": "social",
+        "label": "Social Preview",
+        "weight": 10,
+        "score": 0,
+        "summary": "Missing Open Graph metadata lowers share quality.",
+        "recommendations": [
+          "Populate og:title, og:description, and og:image for richer shares.",
+          "Add twitter:card to define summary or summary_large_image previews."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "highlights": [
+            {
+              "label": "OG title",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "OG description",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "OG image",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Twitter card",
+              "value": "None",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:44:02.168Z"
+      },
+      {
+        "key": "security",
+        "label": "Security & Headers",
+        "weight": 10,
+        "score": 8,
+        "summary": "Security headers set but mixed content detected.",
+        "recommendations": [
+          "Mixed-content resources detected; upgrade to HTTPS."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "https": true,
+          "hsts": true,
+          "mixedContent": 4,
+          "highlights": [
+            {
+              "label": "HSTS",
+              "value": "Yes",
+              "status": "good"
+            },
+            {
+              "label": "NoSniff",
+              "value": "Yes",
+              "status": "good"
+            },
+            {
+              "label": "Frame protection",
+              "value": "Yes",
+              "status": "good"
+            },
+            {
+              "label": "Mixed content refs",
+              "value": "4",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:44:02.168Z"
+      },
+      {
+        "key": "accessibility",
+        "label": "Accessibility Lite",
+        "weight": 10,
+        "score": 10,
+        "summary": "Alt coverage at 100%.",
+        "recommendations": [],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "totalImages": 78,
+          "imagesWithAlt": 78,
+          "missingAltSample": [],
+          "landmarksDetected": [
+            "nav",
+            "aside",
+            "[role=main]",
+            "[role=navigation]",
+            "[role=contentinfo]"
+          ],
+          "highlights": [
+            {
+              "label": "Images with alt",
+              "value": "78/78",
+              "status": "good"
+            },
+            {
+              "label": "Landmark types",
+              "value": "5",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:44:02.168Z"
+      },
+      {
+        "key": "links",
+        "label": "Links & Indexability",
+        "weight": 5,
+        "score": 10,
+        "summary": "Sampled links healthy.",
+        "recommendations": [],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "totalSampled": 50,
+          "brokenSample": [],
+          "nofollowRatio": 0,
+          "highlights": [
+            {
+              "label": "Links sampled",
+              "value": "50",
+              "status": "good"
+            },
+            {
+              "label": "Broken links",
+              "value": "0",
+              "status": "good"
+            },
+            {
+              "label": "Nofollow ratio",
+              "value": "0%",
+              "status": "good"
+            },
+            {
+              "label": "Indexable",
+              "value": "Yes",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T10:44:02.168Z"
+      }
+    ],
+    "createdAt": "2025-11-11T10:44:02.303Z"
+  },
+  {
+    "id": "GoK3PiYaz4sE",
+    "url": "https://dreamicons.app/",
+    "normalizedUrl": "https://dreamicons.app/",
+    "strategy": "mobile",
+    "locale": "en_IN",
+    "overall": 3.48,
+    "modules": [
+      {
+        "key": "performance",
+        "label": "Performance & Core Web Vitals",
+        "weight": 15,
+        "score": 4.5,
+        "summary": "PSI performance scored 45 out of 100.",
+        "recommendations": [
+          "Reduce Largest Contentful Paint below 2.5s with image and font optimizations.",
+          "Lower Total Blocking Time with code splitting and async loading."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 2,
+          "info": 0
+        },
+        "details": {
+          "metrics": {
+            "lcp": 12546.557734756027,
+            "cls": 0.006372833371033769,
+            "inp": null,
+            "tbt": 941.5,
+            "perfScore": 0.45
+          },
+          "highlights": [
+            {
+              "label": "Performance Score",
+              "value": "45",
+              "status": "poor"
+            },
+            {
+              "label": "LCP",
+              "value": "12.55s",
+              "status": "poor"
+            },
+            {
+              "label": "CLS",
+              "value": "0.01",
+              "status": "good"
+            },
+            {
+              "label": "TBT",
+              "value": "942ms",
+              "status": "poor"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T12:06:41.587Z"
+      },
+      {
+        "key": "schema",
+        "label": "Schema & Structured Data",
+        "weight": 15,
+        "score": 2,
+        "summary": "No structured data detected on the scanned page.",
+        "recommendations": [
+          "Add JSON-LD markup describing key entities (WebSite, WebPage, Product, etc.).",
+          "Provide WebSite schema with SearchAction for better branded SERP coverage.",
+          "Add BreadcrumbList JSON-LD to improve sitelinks."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "schemas": [],
+          "highlights": [
+            {
+              "label": "Schemas detected",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Validator errors",
+              "value": "0",
+              "status": "good"
+            },
+            {
+              "label": "Warnings",
+              "value": "0",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T12:06:41.587Z"
+      },
+      {
+        "key": "geo",
+        "label": "GEO Localization & Hreflang",
+        "weight": 15,
+        "score": 0,
+        "summary": "0 hreflang entries detected; server geo differs from target market.",
+        "recommendations": [
+          "Add hreflang annotations to signal language/region variants.",
+          "Include xhtml:link alternates inside sitemap.xml for crawl efficiency.",
+          "Consider regional hosting/CDN POPs near target market."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "hreflangCount": 0,
+          "ccTld": null,
+          "highlights": [
+            {
+              "label": "Hreflang tags",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Sitemap alternates",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "ccTLD match",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Server region",
+              "value": "Unknown",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T12:06:41.587Z"
+      },
+      {
+        "key": "seo_basics",
+        "label": "SEO Basics",
+        "weight": 20,
+        "score": 4,
+        "summary": "Core on-page tags are mostly configured.",
+        "recommendations": [
+          "Keep the <title> tag between 30-60 characters.",
+          "Add a canonical tag.",
+          "Ensure sitemap.xml is accessible and referenced in robots.txt."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 2,
+          "info": 0
+        },
+        "details": {
+          "title": "Home - Dream Icons",
+          "metaDescription": "Explore a vast collection of beautiful, customizable icons crafted for UI/UX designers, developers, and creatives. SVG, PNG, and web-ready formats.",
+          "indexable": true,
+          "highlights": [
+            {
+              "label": "Title length",
+              "value": "18",
+              "status": "good"
+            },
+            {
+              "label": "Meta description",
+              "value": "147",
+              "status": "good"
+            },
+            {
+              "label": "Canonical tags",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Indexable",
+              "value": "Yes",
+              "status": "good"
+            },
+            {
+              "label": "Sitemap reachable",
+              "value": "No",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T12:06:41.587Z"
+      },
+      {
+        "key": "social",
+        "label": "Social Preview",
+        "weight": 10,
+        "score": 1,
+        "summary": "Missing Open Graph metadata lowers share quality.",
+        "recommendations": [
+          "Populate og:title, og:description, and og:image for richer shares."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "highlights": [
+            {
+              "label": "OG title",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "OG description",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "OG image",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Twitter card",
+              "value": "summary_large_image",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T12:06:41.587Z"
+      },
+      {
+        "key": "security",
+        "label": "Security & Headers",
+        "weight": 10,
+        "score": 4,
+        "summary": "Core security headers look good.",
+        "recommendations": [
+          "Add Strict-Transport-Security header.",
+          "Add X-Content-Type-Options: nosniff.",
+          "Set X-Frame-Options DENY or a CSP frame-ancestors rule."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "https": true,
+          "hsts": false,
+          "mixedContent": 0,
+          "highlights": [
+            {
+              "label": "HSTS",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "NoSniff",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Frame protection",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Mixed content refs",
+              "value": "0",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T12:06:41.587Z"
+      },
+      {
+        "key": "accessibility",
+        "label": "Accessibility Lite",
+        "weight": 10,
+        "score": 10,
+        "summary": "Alt coverage at 100%.",
+        "recommendations": [],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "totalImages": 9,
+          "imagesWithAlt": 9,
+          "missingAltSample": [],
+          "landmarksDetected": [
+            "main",
+            "nav",
+            "header",
+            "footer"
+          ],
+          "highlights": [
+            {
+              "label": "Images with alt",
+              "value": "9/9",
+              "status": "good"
+            },
+            {
+              "label": "Landmark types",
+              "value": "4",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T12:06:41.587Z"
+      },
+      {
+        "key": "links",
+        "label": "Links & Indexability",
+        "weight": 5,
+        "score": 4,
+        "summary": "7 of 11 sampled links failed.",
+        "recommendations": [
+          "7 sampled links returned errors; fix or remove broken URLs."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "totalSampled": 11,
+          "brokenSample": [
+            {
+              "url": "https://dreamicons.app/webapp",
+              "statusCode": null,
+              "ok": false
+            },
+            {
+              "url": "https://dreamicons.app/icon-request",
+              "statusCode": null,
+              "ok": false,
+              "rel": "noopener"
+            },
+            {
+              "url": "https://dreamicons.app/support/",
+              "statusCode": null,
+              "ok": false
+            },
+            {
+              "url": "https://dreamicons.app/cancellation/",
+              "statusCode": null,
+              "ok": false
+            },
+            {
+              "url": "https://dreamicons.app/terms-of-service/",
+              "statusCode": null,
+              "ok": false
+            }
+          ],
+          "nofollowRatio": 0,
+          "highlights": [
+            {
+              "label": "Links sampled",
+              "value": "11",
+              "status": "good"
+            },
+            {
+              "label": "Broken links",
+              "value": "7",
+              "status": "warn"
+            },
+            {
+              "label": "Nofollow ratio",
+              "value": "0%",
+              "status": "good"
+            },
+            {
+              "label": "Indexable",
+              "value": "Yes",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T12:06:41.587Z"
+      }
+    ],
+    "createdAt": "2025-11-11T12:06:41.639Z"
+  },
+  {
+    "id": "vSNrhqNB2GRk",
+    "url": "https://designdream.in/",
+    "normalizedUrl": "https://designdream.in/",
+    "strategy": "mobile",
+    "locale": "en_IN",
+    "overall": 2.88,
+    "modules": [
+      {
+        "key": "performance",
+        "label": "Performance & Core Web Vitals",
+        "weight": 15,
+        "score": 7.2,
+        "summary": "PSI performance scored 72 out of 100.",
+        "recommendations": [
+          "Reduce Largest Contentful Paint below 2.5s with image and font optimizations."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "metrics": {
+            "lcp": 5600.933656224179,
+            "cls": 0.06593106989905088,
+            "inp": null,
+            "tbt": 123,
+            "perfScore": 0.72
+          },
+          "highlights": [
+            {
+              "label": "Performance Score",
+              "value": "72",
+              "status": "warn"
+            },
+            {
+              "label": "LCP",
+              "value": "5.60s",
+              "status": "poor"
+            },
+            {
+              "label": "CLS",
+              "value": "0.07",
+              "status": "good"
+            },
+            {
+              "label": "TBT",
+              "value": "123ms",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T13:14:45.473Z"
+      },
+      {
+        "key": "schema",
+        "label": "Schema & Structured Data",
+        "weight": 15,
+        "score": 2,
+        "summary": "No structured data detected on the scanned page.",
+        "recommendations": [
+          "Add JSON-LD markup describing key entities (WebSite, WebPage, Product, etc.).",
+          "Provide WebSite schema with SearchAction for better branded SERP coverage.",
+          "Add BreadcrumbList JSON-LD to improve sitelinks."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "schemas": [],
+          "highlights": [
+            {
+              "label": "Schemas detected",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Validator errors",
+              "value": "0",
+              "status": "good"
+            },
+            {
+              "label": "Warnings",
+              "value": "0",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T13:14:45.473Z"
+      },
+      {
+        "key": "geo",
+        "label": "GEO Localization & Hreflang",
+        "weight": 15,
+        "score": 2,
+        "summary": "0 hreflang entries detected; server geo differs from target market.",
+        "recommendations": [
+          "Add hreflang annotations to signal language/region variants.",
+          "Include xhtml:link alternates inside sitemap.xml for crawl efficiency.",
+          "Consider regional hosting/CDN POPs near target market."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "hreflangCount": 0,
+          "ccTld": "IN",
+          "highlights": [
+            {
+              "label": "Hreflang tags",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Sitemap alternates",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "ccTLD match",
+              "value": "Yes",
+              "status": "good"
+            },
+            {
+              "label": "Server region",
+              "value": "Unknown",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T13:14:45.473Z"
+      },
+      {
+        "key": "seo_basics",
+        "label": "SEO Basics",
+        "weight": 20,
+        "score": 2,
+        "summary": "Core on-page tags are mostly configured.",
+        "recommendations": [
+          "Keep the <title> tag between 30-60 characters.",
+          "Meta description should be 70-160 characters describing the page intent.",
+          "Add a canonical tag.",
+          "Ensure sitemap.xml is accessible and referenced in robots.txt."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 2,
+          "info": 0
+        },
+        "details": {
+          "title": "Design Dream",
+          "metaDescription": "",
+          "indexable": true,
+          "highlights": [
+            {
+              "label": "Title length",
+              "value": "12",
+              "status": "good"
+            },
+            {
+              "label": "Meta description",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Canonical tags",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Indexable",
+              "value": "Yes",
+              "status": "good"
+            },
+            {
+              "label": "Sitemap reachable",
+              "value": "No",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T13:14:45.473Z"
+      },
+      {
+        "key": "social",
+        "label": "Social Preview",
+        "weight": 10,
+        "score": 0,
+        "summary": "Missing Open Graph metadata lowers share quality.",
+        "recommendations": [
+          "Populate og:title, og:description, and og:image for richer shares.",
+          "Add twitter:card to define summary or summary_large_image previews."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "highlights": [
+            {
+              "label": "OG title",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "OG description",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "OG image",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Twitter card",
+              "value": "None",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T13:14:45.473Z"
+      },
+      {
+        "key": "security",
+        "label": "Security & Headers",
+        "weight": 10,
+        "score": 2,
+        "summary": "Core security headers look good.",
+        "recommendations": [
+          "Add Strict-Transport-Security header.",
+          "Add X-Content-Type-Options: nosniff.",
+          "Set X-Frame-Options DENY or a CSP frame-ancestors rule.",
+          "Return Content-Type: text/html; charset=UTF-8."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "https": true,
+          "hsts": false,
+          "mixedContent": 0,
+          "highlights": [
+            {
+              "label": "HSTS",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "NoSniff",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Frame protection",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Mixed content refs",
+              "value": "0",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T13:14:45.473Z"
+      },
+      {
+        "key": "accessibility",
+        "label": "Accessibility Lite",
+        "weight": 10,
+        "score": 1,
+        "summary": "Alt coverage at 12%.",
+        "recommendations": [
+          "Add descriptive alt text to all meaningful images. Decorative media should use empty alt attributes.",
+          "Use at least two semantic landmarks (<main>, <nav>, <aside>, etc.) for better keyboard navigation."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "totalImages": 42,
+          "imagesWithAlt": 5,
+          "missingAltSample": [
+            {
+              "src": "images/mail-icon.svg",
+              "index": 0
+            },
+            {
+              "src": "images/logo.svg",
+              "index": 1
+            },
+            {
+              "src": "images/close-menu.svg",
+              "index": 2
+            },
+            {
+              "src": "images/logo.svg",
+              "index": 3
+            },
+            {
+              "src": "images/menu-bar.svg",
+              "index": 4
+            }
+          ],
+          "landmarksDetected": [
+            "main"
+          ],
+          "highlights": [
+            {
+              "label": "Images with alt",
+              "value": "5/42",
+              "status": "warn"
+            },
+            {
+              "label": "Landmark types",
+              "value": "1",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T13:14:45.473Z"
+      },
+      {
+        "key": "links",
+        "label": "Links & Indexability",
+        "weight": 5,
+        "score": 10,
+        "summary": "Sampled links healthy.",
+        "recommendations": [],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "totalSampled": 17,
+          "brokenSample": [],
+          "nofollowRatio": 0,
+          "highlights": [
+            {
+              "label": "Links sampled",
+              "value": "17",
+              "status": "good"
+            },
+            {
+              "label": "Broken links",
+              "value": "0",
+              "status": "good"
+            },
+            {
+              "label": "Nofollow ratio",
+              "value": "0%",
+              "status": "good"
+            },
+            {
+              "label": "Indexable",
+              "value": "Yes",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T13:14:45.473Z"
+      }
+    ],
+    "createdAt": "2025-11-11T13:14:45.500Z"
+  },
+  {
+    "id": "dqBWhrv0cIhZ",
+    "url": "https://dreamicons.app/",
+    "normalizedUrl": "https://dreamicons.app/",
+    "strategy": "mobile",
+    "locale": "en_IN",
+    "overall": 4.12,
+    "modules": [
+      {
+        "key": "performance",
+        "label": "Performance & Core Web Vitals",
+        "weight": 15,
+        "score": 4.1,
+        "summary": "PSI performance scored 41 out of 100.",
+        "recommendations": [
+          "Reduce Largest Contentful Paint below 2.5s with image and font optimizations.",
+          "Lower Total Blocking Time with code splitting and async loading."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 2,
+          "info": 0
+        },
+        "details": {
+          "metrics": {
+            "lcp": 12504,
+            "cls": 0.006372833371033769,
+            "inp": null,
+            "tbt": 1382.5,
+            "perfScore": 0.41
+          },
+          "highlights": [
+            {
+              "label": "Performance Score",
+              "value": "41",
+              "status": "poor"
+            },
+            {
+              "label": "LCP",
+              "value": "12.50s",
+              "status": "poor"
+            },
+            {
+              "label": "CLS",
+              "value": "0.01",
+              "status": "good"
+            },
+            {
+              "label": "TBT",
+              "value": "1.38s",
+              "status": "poor"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T13:18:38.262Z"
+      },
+      {
+        "key": "schema",
+        "label": "Schema & Structured Data",
+        "weight": 15,
+        "score": 2,
+        "summary": "No structured data detected on the scanned page.",
+        "recommendations": [
+          "Add JSON-LD markup describing key entities (WebSite, WebPage, Product, etc.).",
+          "Provide WebSite schema with SearchAction for better branded SERP coverage.",
+          "Add BreadcrumbList JSON-LD to improve sitelinks."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "schemas": [],
+          "highlights": [
+            {
+              "label": "Schemas detected",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Validator errors",
+              "value": "0",
+              "status": "good"
+            },
+            {
+              "label": "Warnings",
+              "value": "0",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T13:18:38.262Z"
+      },
+      {
+        "key": "geo",
+        "label": "GEO Localization & Hreflang",
+        "weight": 15,
+        "score": 0,
+        "summary": "0 hreflang entries detected; server geo differs from target market.",
+        "recommendations": [
+          "Add hreflang annotations to signal language/region variants.",
+          "Include xhtml:link alternates inside sitemap.xml for crawl efficiency.",
+          "Consider regional hosting/CDN POPs near target market."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "hreflangCount": 0,
+          "ccTld": null,
+          "highlights": [
+            {
+              "label": "Hreflang tags",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Sitemap alternates",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "ccTLD match",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Server region",
+              "value": "Unknown",
+              "status": "warn"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T13:18:38.262Z"
+      },
+      {
+        "key": "seo_basics",
+        "label": "SEO Basics",
+        "weight": 20,
+        "score": 6,
+        "summary": "Core on-page tags are mostly configured.",
+        "recommendations": [
+          "Keep the <title> tag between 30-60 characters.",
+          "Add a canonical tag."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 2,
+          "info": 0
+        },
+        "details": {
+          "title": "Home - Dream Icons",
+          "metaDescription": "Explore a vast collection of beautiful, customizable icons crafted for UI/UX designers, developers, and creatives. SVG, PNG, and web-ready formats.",
+          "indexable": true,
+          "highlights": [
+            {
+              "label": "Title length",
+              "value": "18",
+              "status": "good"
+            },
+            {
+              "label": "Meta description",
+              "value": "147",
+              "status": "good"
+            },
+            {
+              "label": "Canonical tags",
+              "value": "0",
+              "status": "warn"
+            },
+            {
+              "label": "Indexable",
+              "value": "Yes",
+              "status": "good"
+            },
+            {
+              "label": "Sitemap reachable",
+              "value": "Yes",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T13:18:38.262Z"
+      },
+      {
+        "key": "social",
+        "label": "Social Preview",
+        "weight": 10,
+        "score": 1,
+        "summary": "Missing Open Graph metadata lowers share quality.",
+        "recommendations": [
+          "Populate og:title, og:description, and og:image for richer shares."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 1,
+          "info": 0
+        },
+        "details": {
+          "highlights": [
+            {
+              "label": "OG title",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "OG description",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "OG image",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Twitter card",
+              "value": "summary_large_image",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T13:18:38.262Z"
+      },
+      {
+        "key": "security",
+        "label": "Security & Headers",
+        "weight": 10,
+        "score": 4,
+        "summary": "Core security headers look good.",
+        "recommendations": [
+          "Add Strict-Transport-Security header.",
+          "Add X-Content-Type-Options: nosniff.",
+          "Set X-Frame-Options DENY or a CSP frame-ancestors rule."
+        ],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "https": true,
+          "hsts": false,
+          "mixedContent": 0,
+          "highlights": [
+            {
+              "label": "HSTS",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "NoSniff",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Frame protection",
+              "value": "No",
+              "status": "warn"
+            },
+            {
+              "label": "Mixed content refs",
+              "value": "0",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T13:18:38.262Z"
+      },
+      {
+        "key": "accessibility",
+        "label": "Accessibility Lite",
+        "weight": 10,
+        "score": 10,
+        "summary": "Alt coverage at 100%.",
+        "recommendations": [],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "totalImages": 9,
+          "imagesWithAlt": 9,
+          "missingAltSample": [],
+          "landmarksDetected": [
+            "main",
+            "nav",
+            "header",
+            "footer"
+          ],
+          "highlights": [
+            {
+              "label": "Images with alt",
+              "value": "9/9",
+              "status": "good"
+            },
+            {
+              "label": "Landmark types",
+              "value": "4",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T13:18:38.262Z"
+      },
+      {
+        "key": "links",
+        "label": "Links & Indexability",
+        "weight": 5,
+        "score": 10,
+        "summary": "Sampled links healthy.",
+        "recommendations": [],
+        "issues": {
+          "critical": 0,
+          "warning": 0,
+          "info": 0
+        },
+        "details": {
+          "totalSampled": 11,
+          "brokenSample": [],
+          "nofollowRatio": 0,
+          "highlights": [
+            {
+              "label": "Links sampled",
+              "value": "11",
+              "status": "good"
+            },
+            {
+              "label": "Broken links",
+              "value": "0",
+              "status": "good"
+            },
+            {
+              "label": "Nofollow ratio",
+              "value": "0%",
+              "status": "good"
+            },
+            {
+              "label": "Indexable",
+              "value": "Yes",
+              "status": "good"
+            }
+          ]
+        },
+        "lastChecked": "2025-11-11T13:18:38.262Z"
+      }
+    ],
+    "createdAt": "2025-11-11T13:18:38.332Z"
+  }
+]

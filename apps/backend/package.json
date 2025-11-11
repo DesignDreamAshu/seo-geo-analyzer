@@ -1,20 +1,30 @@
 {
-  "name": "backend",
+  "name": "@seo-geo/backend",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
-  "main": "index.js",
   "scripts": {
-    "dev": "node index.js",
+    "dev": "tsx src/index.ts",
     "start": "node index.js"
   },
   "dependencies": {
+    "chrome-launcher": "^0.15.2",
+    "cheerio": "^1.0.0-rc.12",
     "cors": "^2.8.5",
-    "dotenv": "^16.6.1",
-    "express": "^4.21.2",
-    "express-rate-limit": "^7.4.0",
-    "helmet": "^7.2.0",
-    "lighthouse": "^12.1.0",
-    "node-fetch": "^3.3.2",
-    "morgan": "^1.10.1"
+    "detect-port": "^2.1.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "fast-xml-parser": "^4.5.0",
+    "fs-extra": "^11.2.0",
+    "got": "^14.4.2",
+    "html-pdf-node": "^1.0.8",
+    "lighthouse": "^12.3.0",
+    "linkedom": "^0.18.5",
+    "nanoid": "^5.0.7",
+    "structured-data-testing-tool": "^4.5.0",
+    "tsx": "^4.19.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
   }
 }
