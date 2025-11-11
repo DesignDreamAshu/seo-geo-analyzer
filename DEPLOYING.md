@@ -6,7 +6,7 @@ Backend on Render
 5) Env vars:
    - PORT=4000
    - CORS_ORIGIN=https://<netlify-site>.netlify.app
-  - GOOGLE_API_KEY=AIzaSyCqu9AFl77Az00YWFye1zIhen7kDZHu74o
+  - GOOGLE_API_KEY=<your-pagespeed-api-key>
 6) Deploy, then test GET /api/health
 7) Set Auto Deploy=Yes and delete any legacy service that targets DreamIcons/dreamicons-app-backend.
 
