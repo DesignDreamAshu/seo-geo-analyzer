@@ -9,12 +9,24 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Curl health endpoint
+      - name: Ping frontend
         env:
-          HEALTH_URL: ${{ secrets.HEALTH_URL }}
+          FRONTEND_URL: ${{ secrets.KEEP_ALIVE_FRONTEND_URL }}
         run: |
-          if [ -z "$HEALTH_URL" ]; then
-            echo "HEALTH_URL secret is not set"
-            exit 1
-          fi
-          curl -fsS "$HEALTH_URL"
+          set -euo pipefail
+          DEFAULT_FRONTEND_URL="https://seo-geo-analyzer.netlify.app/"
+          URL="${FRONTEND_URL:-$DEFAULT_FRONTEND_URL}"
+
+          echo "Pinging $URL"
+          curl -fsS "$URL" >/dev/null
+
+      - name: Ping backend
+        env:
+          BACKEND_URL: ${{ secrets.KEEP_ALIVE_BACKEND_URL }}
+        run: |
+          set -euo pipefail
+          DEFAULT_BACKEND_URL="https://seo-geo-analyzer.onrender.com/api/health"
+          URL="${BACKEND_URL:-$DEFAULT_BACKEND_URL}"
+
+          echo "Pinging $URL"
+          curl -fsS "$URL" >/dev/null
