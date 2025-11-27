@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Workspace root for the SEO & GEO Analyzer monorepo",
   "workspaces": [
-    "apps/*",
+    "apps/backend",
     "packages/*"
   ],
   "scripts": {
