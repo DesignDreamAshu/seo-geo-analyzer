@@ -4,6 +4,7 @@ import axios from "axios";
 import cors from "cors";
 import { nanoid } from "nanoid";
 import { generatePdf } from "html-pdf-node";
+import { ReportGenerator } from "lighthouse/report/generator/report-generator.js";
 import { analyzeSite, AnalysisTimeoutError, calculateWeightedScore } from "./analysis";
 import { normalizeAuditUrl } from "./storage/lighthouse-store";
 import { saveShareRecord, getShareRecord } from "./storage/share-store";
@@ -11,17 +12,35 @@ import type { ExportPayload, ModuleSnapshot } from "./types";
 
 const PSI_URL = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
 
-async function runLighthouseViaPSI(url: string) {
+async function runLighthouseViaPSI(url: string, strategy: "mobile" | "desktop") {
+  const apiKey = process.env.GOOGLE_API_KEY || process.env.PSI_API_KEY;
+  if (!apiKey) {
+    throw new Error("Missing GOOGLE_API_KEY / PSI_API_KEY");
+  }
+
   const { data } = await axios.get(PSI_URL, {
     params: {
       url,
-      key: process.env.GOOGLE_API_KEY ?? process.env.PSI_API_KEY,
-      category: ["PERFORMANCE", "SEO", "BEST_PRACTICES", "ACCESSIBILITY"],
-      strategy: "MOBILE",
+      strategy,
+      category: "performance",
+      key: apiKey,
     },
   });
 
+  if (!data?.lighthouseResult) {
+    throw new Error("PSI response missing lighthouseResult");
+  }
+
   return data.lighthouseResult;
+}
+
+async function runDualPSI(url: string) {
+  const normalizedUrl = normalizeAuditUrl(url);
+  const [mobile, desktop] = await Promise.all([
+    runLighthouseViaPSI(normalizedUrl, "mobile"),
+    runLighthouseViaPSI(normalizedUrl, "desktop"),
+  ]);
+  return { normalizedUrl, mobile, desktop };
 }
 
 const app = express();
@@ -400,8 +419,8 @@ app.post("/api/lighthouse-runs", async (req, res) => {
   }
 
   try {
-    const lighthouse = await runLighthouseViaPSI(url);
-    return res.json({ ok: true, url, lighthouse });
+    const { normalizedUrl, mobile, desktop } = await runDualPSI(url);
+    return res.json({ ok: true, url: normalizedUrl, lighthouse: { mobile, desktop } });
   } catch (err) {
     console.error("PSI run error", (err as Error).message);
     return res.status(500).json({
@@ -418,8 +437,8 @@ app.get("/api/lighthouse-runs", async (req, res) => {
   }
 
   try {
-    const lighthouse = await runLighthouseViaPSI(String(url));
-    return res.json({ ok: true, url, lighthouse });
+    const { normalizedUrl, mobile, desktop } = await runDualPSI(String(url));
+    return res.json({ ok: true, url: normalizedUrl, lighthouse: { mobile, desktop } });
   } catch (err) {
     console.error("PSI fetch error", (err as Error).message);
     return res.status(500).json({
@@ -436,14 +455,34 @@ app.get("/api/lighthouse-runs/latest", async (req, res) => {
   }
 
   try {
-    const lighthouse = await runLighthouseViaPSI(String(url));
-    return res.json({ ok: true, url, lighthouse });
+    const { normalizedUrl, mobile, desktop } = await runDualPSI(String(url));
+    return res.json({ ok: true, url: normalizedUrl, lighthouse: { mobile, desktop } });
   } catch (err) {
     console.error("PSI latest error", (err as Error).message);
     return res.status(500).json({
       ok: false,
       error: "Unable to fetch latest Lighthouse audit",
     });
+  }
+});
+
+app.get("/api/lighthouse-runs/report", async (req, res) => {
+  const { url, strategy } = req.query || {};
+  if (!url) {
+    return res.status(400).send("url is required");
+  }
+  const normalizedUrl = normalizeAuditUrl(String(url));
+  const device = strategy === "desktop" ? "desktop" : "mobile";
+
+  try {
+    const lighthouse = await runLighthouseViaPSI(normalizedUrl, device);
+    const html = ReportGenerator.generateReport(lighthouse, "html");
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    return res.send(html);
+  } catch (err) {
+    console.error("PSI report error", (err as Error).message);
+    return res.status(500).send("Unable to render Lighthouse report");
   }
 });
 

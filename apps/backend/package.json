@@ -19,6 +19,7 @@
     "fs-extra": "^11.2.0",
     "got": "^14.4.2",
     "html-pdf-node": "^1.0.8",
+    "lighthouse": "^12.8.2",
     "linkedom": "^0.18.5",
     "nanoid": "^5.0.7",
     "structured-data-testing-tool": "^4.5.0",
