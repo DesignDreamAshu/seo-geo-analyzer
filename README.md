@@ -31,7 +31,7 @@ Create `apps/backend/.env` from the example:
 ```
 PORT=4000
 CORS_ORIGIN=http://localhost:8080
-PSI_API_KEY=your-google-pagespeed-api-key
+GOOGLE_API_KEY=your-google-pagespeed-api-key
 PSI_TIMEOUT_MS=60000
 PSI_CACHE_TTL_MS=300000
 PSI_LOCALE=en_US
@@ -63,7 +63,7 @@ npm run build
 
 ### 5. Deploy
 
-1. Deploy the backend (Render, Railway, Fly.io, etc.). Provide `PORT`, `CORS_ORIGIN`, `PSI_API_KEY`, and optional PSI tuning variables.
+1. Deploy the backend (Render, Railway, Fly.io, etc.). Provide `PORT`, `CORS_ORIGIN`, `GOOGLE_API_KEY`, and optional PSI tuning variables.
 2. Configure a keep-alive scheduler (GitHub Actions workflow included) with a secret `HEALTH_URL` pointing to `https://your-api.com/api/health`.
 3. Build the frontend (`npm run build --workspace apps/frontend`) and host the static files (Netlify, Vercel, S3/CloudFront, etc.). Set `VITE_API_BASE` at build time to your deployed API origin.
 
@@ -80,7 +80,7 @@ npm run build
 - `POST /api/audit/lighthouse`
   - **Body**: `{ url: string, strategy?: "mobile" | "desktop", locale?: string, skipCache?: boolean }`
   - **Response**: `{ categories[], metrics[], opportunities[], fieldData, psiMeta, cached }`
-  - Includes category scores, lab metrics, top opportunity savings, page/origin field data, and metadata from PSI. Requires `PSI_API_KEY`.
+  - Includes category scores, lab metrics, top opportunity savings, page/origin field data, and metadata from PSI. Requires `GOOGLE_API_KEY`.
 
 ## Frontend Notes
 

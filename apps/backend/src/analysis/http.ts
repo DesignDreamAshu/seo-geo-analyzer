@@ -70,7 +70,7 @@ export async function fetchPsi(
     searchParams.append("category", category),
   );
 
-  const apiKey = process.env.PSI_API_KEY?.trim();
+  const apiKey = (process.env.GOOGLE_API_KEY ?? process.env.PSI_API_KEY)?.trim();
   if (apiKey) {
     searchParams.set("key", apiKey);
   }

@@ -1,22 +1,29 @@
 import "./env";
 import express from "express";
+import axios from "axios";
 import cors, { type CorsOptions } from "cors";
 import { nanoid } from "nanoid";
-import { ReportGenerator } from "lighthouse/report/generator/report-generator.js";
 import { generatePdf } from "html-pdf-node";
 import detectPort from "detect-port";
-import { runLighthouseSuite } from "./lighthouse-runner";
 import { analyzeSite, AnalysisTimeoutError, calculateWeightedScore } from "./analysis";
-import {
-  getLatestLighthouseRun,
-  getLatestLighthouseRunForUrl,
-  getLighthouseRunById,
-  getLighthouseRunsForUrl,
-  normalizeAuditUrl,
-  readLighthouseRuns,
-} from "./storage/lighthouse-store";
+import { normalizeAuditUrl } from "./storage/lighthouse-store";
 import { saveShareRecord, getShareRecord } from "./storage/share-store";
 import type { ExportPayload, ModuleSnapshot } from "./types";
+
+const PSI_URL = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
+
+async function runLighthouseViaPSI(url: string) {
+  const { data } = await axios.get(PSI_URL, {
+    params: {
+      url,
+      key: process.env.GOOGLE_API_KEY,
+      category: ["PERFORMANCE", "SEO", "BEST_PRACTICES", "ACCESSIBILITY"],
+      strategy: "MOBILE",
+    },
+  });
+
+  return data.lighthouseResult;
+}
 
 const configuredOrigins = (process.env.CORS_ORIGIN ?? "*")
   .split(",")
@@ -419,113 +426,39 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.post("/api/lighthouse-runs", async (req, res) => {
-  const { url } = req.body ?? {};
-  if (!url || typeof url !== "string") {
-    return res.status(400).json({ error: "Missing url in body" });
+  const { url } = req.body || {};
+  if (!url) {
+    return res.status(400).json({ ok: false, error: "url is required" });
   }
 
   try {
-    const normalizedUrl = normalizeAuditUrl(url);
-    const record = await runLighthouseSuite(normalizedUrl);
-    return res.status(201).json(record);
-  } catch (error) {
+    const lighthouse = await runLighthouseViaPSI(url);
+    return res.json({ ok: true, url, lighthouse });
+  } catch (err) {
+    console.error("PSI run error", (err as Error).message);
     return res.status(500).json({
-      error: "Unable to complete Lighthouse audit",
-      message: (error as Error).message,
+      ok: false,
+      error: "Unable to complete Lighthouse audit via PSI API",
     });
   }
 });
 
 app.get("/api/lighthouse-runs/latest", async (req, res) => {
-  const { url } = req.query;
-  const record = typeof url === "string" && url.length
-    ? await getLatestLighthouseRunForUrl(url)
-    : await getLatestLighthouseRun();
-
-  if (!record) {
-    return res.status(404).json({ error: "No Lighthouse runs stored yet." });
-  }
-  res.setHeader("Cache-Control", "no-store");
-  return res.json(record);
-});
-
-app.get("/api/lighthouse-runs/:id", async (req, res) => {
-  const record = await getLighthouseRunById(req.params.id);
-  if (!record) {
-    return res.status(404).json({ error: "Run not found." });
-  }
-  res.setHeader("Cache-Control", "no-store");
-  return res.json(record);
-});
-
-app.get("/api/lighthouse-runs/:id/report", async (req, res) => {
-  const record = await getLighthouseRunById(req.params.id);
-  if (!record) {
-    return res.status(404).send("Run not found");
+  const { url } = req.query || {};
+  if (!url) {
+    return res.status(400).json({ ok: false, error: "url is required" });
   }
 
-  const device = typeof req.query.device === "string" ? req.query.device : "mobile";
-  const format = typeof req.query.format === "string" ? req.query.format.toLowerCase() : "html";
-
-  const lhr =
-    device === "desktop"
-      ? (record.raw?.desktop as Record<string, unknown> | undefined)
-      : (record.raw?.mobile as Record<string, unknown> | undefined);
-
-  if (!lhr) {
-    return res.status(404).send("Report data unavailable");
+  try {
+    const lighthouse = await runLighthouseViaPSI(String(url));
+    return res.json({ ok: true, url, lighthouse });
+  } catch (err) {
+    console.error("PSI latest error", (err as Error).message);
+    return res.status(500).json({
+      ok: false,
+      error: "Unable to fetch latest Lighthouse audit",
+    });
   }
-
-  const buildHtml = () => {
-    const stored =
-      device === "desktop" ? record.reports?.desktop ?? record.reports?.mobile : record.reports?.mobile ?? record.reports?.desktop;
-    return stored && stored.length ? stored : ReportGenerator.generateReport(lhr, "html");
-  };
-
-  switch (format) {
-    case "json": {
-      res.setHeader("Content-Type", "application/json; charset=utf-8");
-      res.setHeader("Content-Disposition", `attachment; filename="${record.id}-${device}.json"`);
-      return res.send(lhr);
-    }
-    case "pdf": {
-      try {
-        const html = buildHtml();
-        const pdfBuffer = await generatePdf({ content: html }, { format: "A4", printBackground: true });
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `attachment; filename="${record.id}-${device}.pdf"`);
-        return res.send(pdfBuffer);
-      } catch (error) {
-        console.error("Unable to render Lighthouse PDF", error);
-        return res.status(500).send("Unable to render Lighthouse report");
-      }
-    }
-    case "html":
-    default: {
-      try {
-        const html = buildHtml();
-        res.setHeader("Content-Type", "text/html; charset=utf-8");
-        res.setHeader("Content-Disposition", `inline; filename="${record.id}-${device}.html"`);
-        return res.send(html);
-      } catch (error) {
-        console.error("Unable to render Lighthouse report on demand", error);
-        return res.status(500).send("Unable to render Lighthouse report");
-      }
-    }
-  }
-});
-
-app.get("/api/lighthouse-runs", async (req, res) => {
-  const { url } = req.query;
-  if (typeof url === "string" && url.length) {
-    const runs = await getLighthouseRunsForUrl(url);
-    res.setHeader("Cache-Control", "no-store");
-    return res.json({ count: runs.length, runs });
-  }
-
-  const runs = await readLighthouseRuns();
-  res.setHeader("Cache-Control", "no-store");
-  return res.json({ count: runs.length, runs });
 });
 
 const DEFAULT_PORT = Number(process.env.PORT) || 4000;

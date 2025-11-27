@@ -8,7 +8,7 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "chrome-launcher": "^0.15.2",
+    "axios": "^1.7.9",
     "cheerio": "^1.0.0-rc.12",
     "cors": "^2.8.5",
     "detect-port": "^2.1.0",
@@ -18,7 +18,6 @@
     "fs-extra": "^11.2.0",
     "got": "^14.4.2",
     "html-pdf-node": "^1.0.8",
-    "lighthouse": "^12.3.0",
     "linkedom": "^0.18.5",
     "nanoid": "^5.0.7",
     "structured-data-testing-tool": "^4.5.0",
