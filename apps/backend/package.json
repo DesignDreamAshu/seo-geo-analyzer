@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
-    "start": "node index.js"
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "axios": "^1.7.9",
@@ -24,6 +25,9 @@
     "tsx": "^4.19.1"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.5",
+    "@types/fs-extra": "^11.0.4",
     "typescript": "^5.8.3"
   }
 }

@@ -9,13 +9,12 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently -r \"npm --workspace apps/frontend run dev\" \"npm --workspace apps/backend run dev\"",
-    "build": "npm --workspace apps/frontend run build && npm --workspace apps/backend run build",
-    "lint": "npm --workspace apps/frontend run lint",
-    "start": "npm --workspace apps/backend run start"
+    "dev": "tsx apps/backend/src/index.ts",
+    "build": "npm --workspace apps/backend run build",
+    "start": "node apps/backend/dist/index.js"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "tsx": "^4.19.1"
   },
   "repository": {
     "type": "git",

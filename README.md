@@ -1,20 +1,6 @@
-# SEO & GEO Analyzer Monorepo
+# SEO & GEO Analyzer – Backend
 
-A full-stack PageSpeed observability starter that pairs a modern Vite + React dashboard with an optimized Express API for running Google Lighthouse (PageSpeed Insights) audits.
-
-## Highlights
-
-- **Fast audits with caching** - validated inputs, PSI timeouts, and in-memory caching keep responses quick.
-- **Actionable UI** - the React client surfaces category scores, Core Web Vitals, top opportunities, real-user field data, and audit history.
-- **Production-ready defaults** - Helmet, CORS allowlists, rate limiting, env-driven config, and a keep-alive workflow.
-- **Workspaces ergonomics** - npm workspaces keep frontend, backend, and future shared packages organized.
-
-## Stack Overview
-
-- **Package management**: npm workspaces (`apps/*`, `packages/*`)
-- **Frontend**: Vite + React + TypeScript (port `8080`)
-- **Backend**: Express (ESM) with CORS, Helmet, Morgan, express-rate-limit, dotenv (port `4000`)
-- **Automation**: GitHub Actions keep-alive workflow (curls `${{ secrets.HEALTH_URL }}` every 10 minutes)
+This repository hosts the Express backend that powers Lighthouse runs via the PageSpeed Insights API. The frontend now lives separately (reqs-to-reality-bot) and connects through `VITE_API_BASE` to this service.
 
 ## Getting Started
 
@@ -29,17 +15,12 @@ npm install
 Create `apps/backend/.env` from the example:
 
 ```
+GOOGLE_API_KEY=your_pagespeed_insights_api_key
+CORS_ORIGIN=https://dream-seo-geo.netlify.app
 PORT=4000
-CORS_ORIGIN=http://localhost:8080
-GOOGLE_API_KEY=your-google-pagespeed-api-key
-PSI_TIMEOUT_MS=60000
-PSI_CACHE_TTL_MS=300000
-PSI_LOCALE=en_US
-PSI_CATEGORIES=performance,seo,best-practices,accessibility
-PSI_MAX_OPPORTUNITIES=5
 ```
 
-For the frontend, set `VITE_API_BASE=https://your-production-api.com` in deployment environments. During local development the app falls back to relative `/api` calls via the Vite dev proxy.
+`GOOGLE_API_KEY` (or `PSI_API_KEY`) is required for PSI calls. Add any additional frontend origins to `CORS_ORIGIN` (comma-separated). The frontend repo should point `VITE_API_BASE` to this API.
 
 ### 3. Run in development
 
@@ -47,57 +28,25 @@ For the frontend, set `VITE_API_BASE=https://your-production-api.com` in deploym
 npm run dev
 ```
 
-This starts:
-
-- Vite dev server on http://localhost:8080 with a proxy for `/api`
-- Express API on http://localhost:4000
+API will listen on http://localhost:4000 (configurable via `PORT`).
 
 ### 4. Build for production
 
 ```bash
 npm run build
+npm run start
 ```
 
-- Frontend output: `apps/frontend/dist`
-- Backend build is a no-op (plain Node.js). Deploy `apps/backend/src/server.js` as-is or bundle with your preferred tooling.
+Build compiles backend TypeScript to `apps/backend/dist` and starts `node apps/backend/dist/index.js`.
 
 ### 5. Deploy
 
-1. Deploy the backend (Render, Railway, Fly.io, etc.). Provide `PORT`, `CORS_ORIGIN`, `GOOGLE_API_KEY`, and optional PSI tuning variables.
-2. Configure a keep-alive scheduler (GitHub Actions workflow included) with a secret `HEALTH_URL` pointing to `https://your-api.com/api/health`.
-3. Build the frontend (`npm run build --workspace apps/frontend`) and host the static files (Netlify, Vercel, S3/CloudFront, etc.). Set `VITE_API_BASE` at build time to your deployed API origin.
-
-## Deployment
-
-- **Netlify frontend**
-  - Set environment variable `VITE_API_BASE=https://<render-service>.onrender.com`
-  - Build command: `npm --workspace apps/frontend run build`
-  - Publish directory: `apps/frontend/dist`
+Deploy to Render/Railway/Fly/etc. Provide `GOOGLE_API_KEY`, `CORS_ORIGIN` (include your frontend origin such as Netlify), and `PORT` if required by your host.
 
 ## Backend API
 
-- `GET /api/health` - lightweight health probe used by the UI and the keep-alive workflow.
-- `POST /api/audit/lighthouse`
-  - **Body**: `{ url: string, strategy?: "mobile" | "desktop", locale?: string, skipCache?: boolean }`
-  - **Response**: `{ categories[], metrics[], opportunities[], fieldData, psiMeta, cached }`
-  - Includes category scores, lab metrics, top opportunity savings, page/origin field data, and metadata from PSI. Requires `GOOGLE_API_KEY`.
+- `GET /api/health` → `{ ok: true, service: "seo-geo-analyzer-api", time }`
+- `POST /api/lighthouse-runs` with `{ url }` → `{ ok: true, url, lighthouse }`
+- `GET /api/lighthouse-runs/latest?url=...` → `{ ok: true, url, lighthouse }`
 
-## Frontend Notes
-
-- Uses `import.meta.env.VITE_API_BASE` when building. In dev it defaults to an empty string so requests are sent to the same origin and proxied to `http://localhost:4000`.
-- The dashboard (`apps/frontend/src/App.tsx`) includes form validation, audit history, Core Web Vitals cards, top opportunity tables, and field data visualizations shaped for the API response.
-
-## Repository Structure
-
-```
-.
-|- apps
-|  |- backend      # Express API
-|  \- frontend     # Vite + React client
-|- packages        # Shared workspace packages (placeholder)
-|- .github/workflows
-|- package.json
-\- README.md
-```
-
-Happy shipping!
+The frontend (reqs-to-reality-bot) should call these endpoints via `VITE_API_BASE` pointing at this service.

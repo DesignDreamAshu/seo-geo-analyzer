@@ -3,7 +3,7 @@ services:
     name: seo-geo-analyzer-backend
     env: node
     rootDir: apps/backend
-    buildCommand: npm install
+    buildCommand: npm install && npm run build
     startCommand: npm run start
     plan: free
     envVars:

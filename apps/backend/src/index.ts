@@ -4,7 +4,6 @@ import axios from "axios";
 import cors from "cors";
 import { nanoid } from "nanoid";
 import { generatePdf } from "html-pdf-node";
-import detectPort from "detect-port";
 import { analyzeSite, AnalysisTimeoutError, calculateWeightedScore } from "./analysis";
 import { normalizeAuditUrl } from "./storage/lighthouse-store";
 import { saveShareRecord, getShareRecord } from "./storage/share-store";
@@ -16,7 +15,7 @@ async function runLighthouseViaPSI(url: string) {
   const { data } = await axios.get(PSI_URL, {
     params: {
       url,
-      key: process.env.GOOGLE_API_KEY,
+      key: process.env.GOOGLE_API_KEY ?? process.env.PSI_API_KEY,
       category: ["PERFORMANCE", "SEO", "BEST_PRACTICES", "ACCESSIBILITY"],
       strategy: "MOBILE",
     },
@@ -26,12 +25,17 @@ async function runLighthouseViaPSI(url: string) {
 }
 
 const app = express();
-app.use(
-  cors({
-    origin: process.env.CORS_ORIGIN?.split(",").map((origin) => origin.trim()).filter(Boolean),
-    methods: ["GET", "POST"],
-  }),
-);
+const defaultOrigins = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:8080",
+  "http://127.0.0.1:8080",
+];
+const extraOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(",").map((origin) => origin.trim()).filter(Boolean)
+  : [];
+const allowedOrigins = [...defaultOrigins, ...extraOrigins];
+app.use(cors({ origin: allowedOrigins }));
 app.use(express.json({ limit: "1mb" }));
 
 const escapeHtml = (value: string) =>
@@ -382,11 +386,11 @@ app.post("/api/recheck/:moduleId", async (req, res) => {
 });
 
 app.get("/", (_req, res) => {
-  res.json({ status: "ok", service: "seo-geo-analyzer-api" });
+  res.json({ ok: true, service: "seo-geo-analyzer-api" });
 });
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, status: "ok", timestamp: new Date().toISOString() });
+  res.json({ ok: true, service: "seo-geo-analyzer-api", time: new Date().toISOString() });
 });
 
 app.post("/api/lighthouse-runs", async (req, res) => {
@@ -443,23 +447,8 @@ app.get("/api/lighthouse-runs/latest", async (req, res) => {
   }
 });
 
-const DEFAULT_PORT = Number(process.env.PORT) || 4000;
+const PORT = Number(process.env.PORT) || 4000;
 
-const startServer = async () => {
-  const availablePort = await detectPort(DEFAULT_PORT);
-
-  if (availablePort !== DEFAULT_PORT) {
-    console.warn(
-      `Requested port ${DEFAULT_PORT} is in use. Falling back to available port ${availablePort}.`,
-    );
-  }
-
-  app.listen(availablePort, () => {
-    console.log(`Dream SEO backend listening on http://localhost:${availablePort}`);
-  });
-};
-
-startServer().catch((error) => {
-  console.error("Unable to start backend server", error);
-  process.exit(1);
+app.listen(PORT, () => {
+  console.log(`Dream SEO backend listening on http://localhost:${PORT}`);
 });
