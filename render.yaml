@@ -4,12 +4,14 @@ services:
     env: node
     rootDir: apps/backend
     buildCommand: npm install
-    startCommand: node index.js
+    startCommand: npm run start
     plan: free
     envVars:
       - key: PORT
         value: 4000
       - key: CORS_ORIGIN
-        value: "*"
+        value: "http://localhost:8080,https://dream-seo-geo.netlify.app"
       - key: GOOGLE_API_KEY
         sync: false
+      - key: NODE_VERSION
+        value: "18"

@@ -1,7 +1,7 @@
 import "./env";
 import express from "express";
 import axios from "axios";
-import cors, { type CorsOptions } from "cors";
+import cors from "cors";
 import { nanoid } from "nanoid";
 import { generatePdf } from "html-pdf-node";
 import detectPort from "detect-port";
@@ -25,49 +25,13 @@ async function runLighthouseViaPSI(url: string) {
   return data.lighthouseResult;
 }
 
-const configuredOrigins = (process.env.CORS_ORIGIN ?? "*")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
-
-const aliasHostnames = new Map<string, string[]>([
-  ["localhost", ["127.0.0.1", "0.0.0.0"]],
-  ["127.0.0.1", ["localhost", "0.0.0.0"]],
-  ["0.0.0.0", ["localhost", "127.0.0.1"]],
-]);
-
-const allowedOrigins = configuredOrigins.flatMap((origin) => {
-  try {
-    const url = new URL(origin);
-    const portSegment = url.port ? `:${url.port}` : "";
-    const normalized = `${url.protocol}//${url.hostname}${portSegment}`;
-    const aliases = aliasHostnames.get(url.hostname) ?? [];
-    const aliasOrigins = aliases.map((host) => `${url.protocol}//${host}${portSegment}`);
-    return [normalized, ...aliasOrigins];
-  } catch {
-    return [origin];
-  }
-});
-const uniqueAllowedOrigins = new Set(allowedOrigins);
-
-const allowAllOrigins = uniqueAllowedOrigins.size === 0 || uniqueAllowedOrigins.has("*");
-
-const corsOptions: CorsOptions = {
-  origin(origin, callback) {
-    if (!origin || allowAllOrigins || uniqueAllowedOrigins.has(origin)) {
-      return callback(null, true);
-    }
-    return callback(new Error(`Origin "${origin}" is not allowed by CORS`));
-  },
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Accept", "Authorization"],
-  optionsSuccessStatus: 204,
-};
-
 const app = express();
-const corsMiddleware = cors(corsOptions);
-app.use(corsMiddleware);
-app.options("*", corsMiddleware);
+app.use(
+  cors({
+    origin: process.env.CORS_ORIGIN?.split(",").map((origin) => origin.trim()).filter(Boolean),
+    methods: ["GET", "POST"],
+  }),
+);
 app.use(express.json({ limit: "1mb" }));
 
 const escapeHtml = (value: string) =>
@@ -422,7 +386,7 @@ app.get("/", (_req, res) => {
 });
 
 app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
+  res.json({ ok: true, status: "ok", timestamp: new Date().toISOString() });
 });
 
 app.post("/api/lighthouse-runs", async (req, res) => {
@@ -439,6 +403,24 @@ app.post("/api/lighthouse-runs", async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: "Unable to complete Lighthouse audit via PSI API",
+    });
+  }
+});
+
+app.get("/api/lighthouse-runs", async (req, res) => {
+  const { url } = req.query || {};
+  if (!url) {
+    return res.status(400).json({ ok: false, error: "url is required" });
+  }
+
+  try {
+    const lighthouse = await runLighthouseViaPSI(String(url));
+    return res.json({ ok: true, url, lighthouse });
+  } catch (err) {
+    console.error("PSI fetch error", (err as Error).message);
+    return res.status(500).json({
+      ok: false,
+      error: "Unable to fetch Lighthouse audit",
     });
   }
 });
