@@ -22,3 +22,14 @@ apps/backend/data/
 data/
 *.log
 
+# test outputs & transient artifacts
+apps/backend/audit.json
+apps/backend/browser-capability.json
+apps/backend/legacy-stability.json
+apps/backend/manifest.json
+apps/backend/parity.json
+audit.json
+browser-capability.json
+legacy-stability.json
+manifest.json
+parity.json
