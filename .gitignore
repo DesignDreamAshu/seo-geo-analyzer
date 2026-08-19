@@ -33,3 +33,4 @@ browser-capability.json
 legacy-stability.json
 manifest.json
 parity.json
+artifacts/
