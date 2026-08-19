@@ -99,7 +99,7 @@ const EXTERNAL_LINK_PARITY_TARGETS = [
     expectedOracleStatus: "valid_destination",
   },
   {
-    url: "https://httpstat.us/404",
+    url: "https://www.google.com/non-existent-page-404-test-xyz",
     sourcePage: "https://www.botconsulting.io/test",
     anchorText: "Broken Link",
     expectedOracleStatus: "broken_destination",
@@ -412,11 +412,15 @@ async function extractPlaywrightOracleFacts(browser: any, url: string): Promise<
         "input:not([type='hidden']):not([type='submit']):not([type='button']), textarea, select"
       );
       let unlabelledCount = 0;
-      inputs.forEach((input) => {
+      inputs.forEach((input: any) => {
         const id = input.getAttribute("id");
         const hasLabel = id ? Boolean(document.querySelector(`label[for="${id}"]`)) : false;
-        const hasAria = Boolean(input.getAttribute("aria-label") || input.getAttribute("aria-labelledby"));
-        const isWrappedInLabel = Boolean(input.closest("label"));
+        const hasAria = Boolean(
+          input.getAttribute("aria-label") ||
+            input.getAttribute("aria-labelledby") ||
+            input.getAttribute("title")
+        );
+        const isWrappedInLabel = Boolean(input.closest("label") || (input.labels && input.labels.length > 0));
         if (!hasLabel && !hasAria && !isWrappedInLabel) {
           unlabelledCount++;
         }
