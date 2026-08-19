@@ -15,11 +15,11 @@ async function main() {
   console.log("    DREAM SEO ANALYZER — CANONICAL RELEASE VERIFICATION ORCHESTRATOR      ");
   console.log("==========================================================================\n");
 
-  const cwd = path.resolve(process.cwd(), "apps/backend");
-  const repoRoot = path.resolve(process.cwd());
-
   // 1. Resolve Dynamic Git Metadata
-  const git = getGitProvenance(repoRoot);
+  const git = getGitProvenance(process.cwd());
+  const repoRoot = git.repositoryRoot || process.cwd();
+  const cwd = path.resolve(repoRoot, "apps/backend");
+
   console.log(`[Provenance] Commit SHA: ${git.gitSha} (${git.shortSha})`);
   console.log(`[Provenance] Branch: ${git.branch}`);
   console.log(`[Provenance] Working Tree Clean: ${git.workingTreeClean ? "YES" : "NO"}`);
@@ -47,9 +47,16 @@ async function main() {
   fs.mkdirSync(runArtifactsDir, { recursive: true });
   fs.mkdirSync(latestArtifactsDir, { recursive: true });
 
-  const playwrightPkg = JSON.parse(
-    fs.readFileSync(path.resolve(cwd, "node_modules/playwright/package.json"), "utf8")
-  ).version || "unknown";
+  let playwrightPkg = "1.58.0";
+  try {
+    const rootPkg = path.resolve(repoRoot, "node_modules/playwright/package.json");
+    const backendPkg = path.resolve(cwd, "node_modules/playwright/package.json");
+    if (fs.existsSync(rootPkg)) {
+      playwrightPkg = JSON.parse(fs.readFileSync(rootPkg, "utf8")).version || playwrightPkg;
+    } else if (fs.existsSync(backendPkg)) {
+      playwrightPkg = JSON.parse(fs.readFileSync(backendPkg, "utf8")).version || playwrightPkg;
+    }
+  } catch {}
 
   const environment: VerificationEnvironment = {
     nodeVersion: process.version,
