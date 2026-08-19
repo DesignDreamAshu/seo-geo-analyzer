@@ -21,10 +21,13 @@ export type IndexabilityStatus =
 
 export type ExternalLinkOutcome =
   | "confirmed_ok"
-  | "confirmed_broken"
   | "redirected_ok"
+  | "browser_verified_ok"
+  | "confirmed_broken"
+  | "http_404_browser_inconclusive"
   | "bot_blocked_inconclusive"
   | "rate_limited_inconclusive"
+  | "browser_challenge_inconclusive"
   | "timeout_inconclusive"
   | "dns_failure"
   | "ssl_failure"
@@ -156,12 +159,31 @@ export interface OutlinkEntry {
   isBroken?: boolean;
 }
 
+export interface ExternalLinkHttpEvidence {
+  status: number | null;
+  finalUrl: string;
+  method: "GET" | "HEAD";
+  checkedAt: string;
+  outcome: ExternalLinkOutcome;
+}
+
+export interface ExternalLinkBrowserEvidence {
+  attempted: boolean;
+  navigationStatus?: number | null;
+  finalUrl?: string;
+  pageTitle?: string;
+  visibleTextSample?: string;
+  challengeDetected?: boolean;
+  checkedAt?: string;
+  outcome?: ExternalLinkOutcome;
+}
+
 export interface ExternalLinkEvidence {
   rawHref: string;
   resolvedUrl: string;
   normalizedUrl: string;
   sourcePageUrl: string;
-  verificationMethod: "http_get" | "http_head" | "playwright_browser";
+  verificationMethod: "http_get" | "http_head" | "playwright_browser" | "http_plus_playwright";
   requestMethod: "GET" | "HEAD";
   httpStatus: number | null;
   finalUrl: string;
@@ -169,6 +191,8 @@ export interface ExternalLinkEvidence {
   outcome: ExternalLinkOutcome;
   reason: string;
   checkedAt: string;
+  httpVerification?: ExternalLinkHttpEvidence;
+  browserVerification?: ExternalLinkBrowserEvidence;
 }
 
 export interface ExternalLinkTelemetry {
@@ -176,6 +200,7 @@ export interface ExternalLinkTelemetry {
   totalExternalOccurrences: number;
   confirmedOkCount: number;
   redirectedOkCount: number;
+  browserVerifiedOkCount: number;
   confirmedBrokenCount: number;
   botBlockedCount: number;
   rateLimitedCount: number;

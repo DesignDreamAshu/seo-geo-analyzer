@@ -22,6 +22,7 @@
     "lighthouse": "^12.8.2",
     "linkedom": "^0.18.5",
     "nanoid": "^5.0.7",
+    "playwright": "^1.62.1",
     "structured-data-testing-tool": "^4.5.0",
     "tsx": "^4.19.1"
   },

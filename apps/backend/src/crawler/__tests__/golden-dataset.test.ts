@@ -321,6 +321,7 @@ const mockGraph = {
     totalExternalOccurrences: 0,
     confirmedOkCount: 0,
     redirectedOkCount: 0,
+    browserVerifiedOkCount: 0,
     confirmedBrokenCount: 0,
     botBlockedCount: 0,
     rateLimitedCount: 0,

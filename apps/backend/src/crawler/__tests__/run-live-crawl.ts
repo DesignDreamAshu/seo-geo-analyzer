@@ -96,6 +96,51 @@ async function runLiveAudit() {
       console.log(`   -> Systemic Template Fingerprint: ${iss.templateFingerprint} (Component: ${iss.componentGuess || "shared"})`);
     }
   }
+
+  console.log("\n==================================================");
+  console.log("  EXTERNAL LINK TELEMETRY RECONCILIATION");
+  console.log("==================================================");
+  const extTel = (result.linkGraphSummary as any)?.externalLinkTelemetry;
+  if (extTel) {
+    console.log(`Unique External URLs Count: ${extTel.uniqueExternalUrlsCount}`);
+    console.log(`Total External Occurrences: ${extTel.totalExternalOccurrences}`);
+    console.log(`  - Confirmed OK: ${extTel.confirmedOkCount}`);
+    console.log(`  - Redirected OK: ${extTel.redirectedOkCount}`);
+    console.log(`  - Browser Verified OK: ${extTel.browserVerifiedOkCount || 0}`);
+    console.log(`  - Confirmed Broken: ${extTel.confirmedBrokenCount}`);
+    console.log(`  - Bot Blocked / Inconclusive: ${extTel.botBlockedCount}`);
+    console.log(`  - Rate Limited: ${extTel.rateLimitedCount}`);
+    console.log(`  - Excluded Placeholder Hash ('#'): ${extTel.excludedPlaceholderHashCount}`);
+    console.log(`  - Excluded Mailto/Tel/JS: ${extTel.excludedMailtoTelJsCount}`);
+  }
+
+  console.log("\n==================================================");
+  console.log("  CRAWL INVENTORY RECONCILIATION TABLE");
+  console.log("==================================================");
+  const disputedUrls = [
+    "https://www.botconsulting.io/job-categories/sales-marketing",
+    "https://www.botconsulting.io/jobopenings/790176000000574221",
+    "https://www.botconsulting.io/jobopenings/790176000000574233",
+    "https://www.botconsulting.io/jobopenings/790176000000574281",
+    "https://www.botconsulting.io/jobopenings-copy/790176000000574229",
+    "https://www.botconsulting.io/jobopenings-copy/790176000000574249",
+    "https://www.botconsulting.io/post/how-to-build-a-high-performing-gcc-in-india",
+  ];
+
+  for (const du of disputedUrls) {
+    const page = result.crawledPages.find((p) => p.url === du || p.normalizedUrl === du || p.finalUrl === du);
+    if (page) {
+      console.log(`URL: ${du}`);
+      console.log(`  - Present in Crawl Inventory: YES`);
+      console.log(`  - HTTP Status: ${page.statusCode} | Resource: ${page.resourceType}`);
+      console.log(`  - Indexability: ${page.isIndexable} (${page.indexabilityStatus})`);
+      console.log(`  - Class: ${page.classification?.primaryClass}`);
+    } else {
+      console.log(`URL: ${du}`);
+      console.log(`  - Present in Crawl Inventory: NO`);
+      console.log(`  - Reason: Not present in live XML sitemap and not linked from any crawled page`);
+    }
+  }
 }
 
 runLiveAudit().catch(console.error);

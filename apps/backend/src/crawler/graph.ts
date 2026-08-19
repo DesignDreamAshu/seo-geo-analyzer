@@ -131,6 +131,7 @@ export async function buildAndAnalyzeGraph(
 
   let confirmedOkCount = 0;
   let redirectedOkCount = 0;
+  let browserVerifiedOkCount = 0;
   let confirmedBrokenCount = 0;
   let botBlockedCount = 0;
   let rateLimitedCount = 0;
@@ -156,6 +157,9 @@ export async function buildAndAnalyzeGraph(
         case "redirected_ok":
           redirectedOkCount += sources.length;
           break;
+        case "browser_verified_ok":
+          browserVerifiedOkCount += sources.length;
+          break;
         case "confirmed_broken":
           confirmedBrokenCount += sources.length;
           for (const src of sources) {
@@ -170,6 +174,8 @@ export async function buildAndAnalyzeGraph(
           }
           break;
         case "bot_blocked_inconclusive":
+        case "browser_challenge_inconclusive":
+        case "http_404_browser_inconclusive":
           botBlockedCount += sources.length;
           for (const src of sources) {
             botBlockedExternalLinks.push({
@@ -209,6 +215,7 @@ export async function buildAndAnalyzeGraph(
     totalExternalOccurrences: totalExternalLinks,
     confirmedOkCount,
     redirectedOkCount,
+    browserVerifiedOkCount,
     confirmedBrokenCount,
     botBlockedCount,
     rateLimitedCount,
