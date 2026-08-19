@@ -128,7 +128,6 @@ class PlaywrightBrowserPool {
           "--disable-setuid-sandbox",
           "--disable-dev-shm-usage",
           "--disable-gpu",
-          "--single-process",
         ],
       });
       return this.browserInstance;
