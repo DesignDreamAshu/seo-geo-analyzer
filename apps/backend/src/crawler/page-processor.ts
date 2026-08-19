@@ -172,128 +172,131 @@ export async function processPageAuthoritatively(
           userAgent:
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         });
-        const pwPage = await context.newPage();
-        await pwPage.goto(url, { waitUntil: "domcontentloaded", timeout: 12000 });
-        await pwPage.waitForTimeout(400);
+        let renderedDom: any;
+        try {
+          const pwPage = await context.newPage();
+          await pwPage.goto(url, { waitUntil: "domcontentloaded", timeout: 10000 });
+          await pwPage.waitForTimeout(300);
 
-        const renderedDom = await pwPage.evaluate(() => {
-          const docTitle = document.title ? document.title.trim() : null;
-          const metaDesc =
-            document.querySelector('meta[name="description"]')?.getAttribute("content")?.trim() || null;
-          const canonicalTag =
-            document.querySelector('link[rel="canonical"]')?.getAttribute("href")?.trim() || null;
+          renderedDom = await pwPage.evaluate(() => {
+            const docTitle = document.title ? document.title.trim() : null;
+            const metaDesc =
+              document.querySelector('meta[name="description"]')?.getAttribute("content")?.trim() || null;
+            const canonicalTag =
+              document.querySelector('link[rel="canonical"]')?.getAttribute("href")?.trim() || null;
 
-          const h1Nodes = Array.from(document.querySelectorAll("h1"));
-          const h1Texts = h1Nodes.map((n) => (n.textContent || "").trim()).filter(Boolean);
+            const h1Nodes = Array.from(document.querySelectorAll("h1"));
+            const h1Texts = h1Nodes.map((n) => (n.textContent || "").trim()).filter(Boolean);
 
-          const hOutline: Array<{ level: number; text: string; inMainContent: boolean; context: "main" | "nav" | "header" | "footer" | "aside" | "component" }> = [];
-          document.querySelectorAll("h1, h2, h3, h4, h5, h6").forEach((el) => {
-            const level = parseInt(el.tagName.substring(1), 10);
-            const text = (el.textContent || "").trim();
-            const inMain = Boolean(el.closest("main, [role='main'], article"));
-            if (text) hOutline.push({ level, text, inMainContent: inMain, context: inMain ? "main" : "component" });
-          });
-
-          // Main content words
-          const mainEl = document.querySelector("main, [role='main'], #main-content, .main-content, article") as HTMLElement | null;
-          const bodyClone = document.body ? (document.body.cloneNode(true) as HTMLElement) : null;
-          let visWords = 0;
-          if (bodyClone) {
-            bodyClone.querySelectorAll("script, style, noscript, svg, nav, footer, header").forEach((el) => el.remove());
-            const t = (bodyClone.innerText || "").replace(/\s+/g, " ").trim();
-            visWords = t ? t.split(/\s+/).filter(Boolean).length : 0;
-          }
-          let mainWords = visWords;
-          if (mainEl) {
-            const mc = mainEl.cloneNode(true) as HTMLElement;
-            mc.querySelectorAll("script, style, noscript, svg, nav, footer, header").forEach((el) => el.remove());
-            const mt = (mc.innerText || "").replace(/\s+/g, " ").trim();
-            mainWords = mt ? mt.split(/\s+/).filter(Boolean).length : visWords;
-          }
-
-          const forms = Array.from(document.querySelectorAll("form")).map((f) => {
-            const isInsideNavOrFooter = Boolean(f.closest("nav, footer, header, [role='navigation'], [role='banner']"));
-            const formClass = isInsideNavOrFooter ? "global_template_form" : "page_primary_form";
-            const inputs = Array.from(
-              f.querySelectorAll("input:not([type='hidden']):not([type='submit']):not([type='button']), textarea, select")
-            );
-            let unlabelled = 0;
-            inputs.forEach((input) => {
-              const id = input.getAttribute("id");
-              const hasLabel = id ? Boolean(document.querySelector(`label[for="${id}"]`)) : false;
-              const hasAria = Boolean(input.getAttribute("aria-label") || input.getAttribute("aria-labelledby"));
-              const isWrapped = Boolean(input.closest("label"));
-              if (!hasLabel && !hasAria && !isWrapped) unlabelled++;
+            const hOutline: Array<{ level: number; text: string; inMainContent: boolean; context: "main" | "nav" | "header" | "footer" | "aside" | "component" }> = [];
+            document.querySelectorAll("h1, h2, h3, h4, h5, h6").forEach((el) => {
+              const level = parseInt(el.tagName.substring(1), 10);
+              const text = (el.textContent || "").trim();
+              const inMain = Boolean(el.closest("main, [role='main'], article"));
+              if (text) hOutline.push({ level, text, inMainContent: inMain, context: inMain ? "main" : "component" });
             });
+
+            // Main content words
+            const mainEl = document.querySelector("main, [role='main'], #main-content, .main-content, article") as HTMLElement | null;
+            const bodyClone = document.body ? (document.body.cloneNode(true) as HTMLElement) : null;
+            let visWords = 0;
+            if (bodyClone) {
+              bodyClone.querySelectorAll("script, style, noscript, svg, nav, footer, header").forEach((el) => el.remove());
+              const t = (bodyClone.innerText || "").replace(/\s+/g, " ").trim();
+              visWords = t ? t.split(/\s+/).filter(Boolean).length : 0;
+            }
+            let mainWords = visWords;
+            if (mainEl) {
+              const mc = mainEl.cloneNode(true) as HTMLElement;
+              mc.querySelectorAll("script, style, noscript, svg, nav, footer, header").forEach((el) => el.remove());
+              const mt = (mc.innerText || "").replace(/\s+/g, " ").trim();
+              mainWords = mt ? mt.split(/\s+/).filter(Boolean).length : visWords;
+            }
+
+            const forms = Array.from(document.querySelectorAll("form")).map((f) => {
+              const isInsideNavOrFooter = Boolean(f.closest("nav, footer, header, [role='navigation'], [role='banner']"));
+              const formClass = isInsideNavOrFooter ? "global_template_form" : "page_primary_form";
+              const inputs = Array.from(
+                f.querySelectorAll("input:not([type='hidden']):not([type='submit']):not([type='button']), textarea, select")
+              );
+              let unlabelled = 0;
+              inputs.forEach((input) => {
+                const id = input.getAttribute("id");
+                const hasLabel = id ? Boolean(document.querySelector(`label[for="${id}"]`)) : false;
+                const hasAria = Boolean(input.getAttribute("aria-label") || input.getAttribute("aria-labelledby"));
+                const isWrapped = Boolean(input.closest("label"));
+                if (!hasLabel && !hasAria && !isWrapped) unlabelled++;
+              });
+              return {
+                id: f.id || undefined,
+                action: f.action || undefined,
+                method: f.method || undefined,
+                controlCount: inputs.length,
+                unlabelledCount: unlabelled,
+                formClassification: formClass as any,
+                controls: inputs.map((c) => ({
+                  tag: c.tagName.toLowerCase(),
+                  type: c.getAttribute("type") || undefined,
+                  name: c.getAttribute("name") || undefined,
+                  id: c.getAttribute("id") || undefined,
+                  accessibleName: c.getAttribute("aria-label") || null,
+                  isLabelled: Boolean(
+                    c.getAttribute("aria-label") ||
+                      (c.id && document.querySelector(`label[for="${c.id}"]`)) ||
+                      c.closest("label")
+                  ),
+                })),
+              };
+            });
+
+            const imgNodes = Array.from(document.querySelectorAll("img"));
+            const missingAlt = imgNodes.filter((img) => !img.hasAttribute("alt")).length;
+            const images = imgNodes.map((img) => ({
+              url: img.src || "",
+              src: img.src || "",
+              rawSrc: img.getAttribute("src") || "",
+              alt: img.getAttribute("alt") || null,
+              altText: img.getAttribute("alt") || null,
+              hasAltAttribute: img.hasAttribute("alt"),
+              altState: (img.hasAttribute("alt")
+                ? (img.getAttribute("alt")?.trim() ? "descriptive_alt_present" : "empty_alt_decorative")
+                : "missing_alt_attribute") as any,
+              width: null,
+              height: null,
+              isLazyLoaded: img.getAttribute("loading") === "lazy",
+              isExternal: false,
+              isDecorative: img.hasAttribute("alt") && !img.getAttribute("alt")?.trim(),
+              isLinked: Boolean(img.closest("a")),
+            }));
+
+            const mainNodes = document.querySelectorAll("main, [role='main']");
+            const hasMain = mainNodes.length > 0;
+            const landmarks = {
+              hasMain,
+              mainCount: mainNodes.length,
+              navCount: document.querySelectorAll("nav, [role='navigation']").length,
+              footerCount: document.querySelectorAll("footer, [role='contentinfo']").length,
+              headerCount: document.querySelectorAll("header, [role='banner']").length,
+              asideCount: document.querySelectorAll("aside, [role='complementary']").length,
+            };
+
             return {
-              id: f.id || undefined,
-              action: f.action || undefined,
-              method: f.method || undefined,
-              controlCount: inputs.length,
-              unlabelledCount: unlabelled,
-              formClassification: formClass as any,
-              controls: inputs.map((c) => ({
-                tag: c.tagName.toLowerCase(),
-                type: c.getAttribute("type") || undefined,
-                name: c.getAttribute("name") || undefined,
-                id: c.getAttribute("id") || undefined,
-                accessibleName: c.getAttribute("aria-label") || null,
-                isLabelled: Boolean(
-                  c.getAttribute("aria-label") ||
-                    (c.id && document.querySelector(`label[for="${c.id}"]`)) ||
-                    c.closest("label")
-                ),
-              })),
+              docTitle,
+              metaDesc,
+              canonicalTag,
+              h1Texts,
+              hOutline,
+              visWords,
+              mainWords,
+              forms,
+              images,
+              missingAlt,
+              landmarks,
             };
           });
-
-          const imgNodes = Array.from(document.querySelectorAll("img"));
-          const missingAlt = imgNodes.filter((img) => !img.hasAttribute("alt")).length;
-          const images = imgNodes.map((img) => ({
-            url: img.src || "",
-            src: img.src || "",
-            rawSrc: img.getAttribute("src") || "",
-            alt: img.getAttribute("alt") || null,
-            altText: img.getAttribute("alt") || null,
-            hasAltAttribute: img.hasAttribute("alt"),
-            altState: (img.hasAttribute("alt")
-              ? (img.getAttribute("alt")?.trim() ? "descriptive_alt_present" : "empty_alt_decorative")
-              : "missing_alt_attribute") as any,
-            width: null,
-            height: null,
-            isLazyLoaded: img.getAttribute("loading") === "lazy",
-            isExternal: false,
-            isDecorative: img.hasAttribute("alt") && !img.getAttribute("alt")?.trim(),
-            isLinked: Boolean(img.closest("a")),
-          }));
-
-          const mainNodes = document.querySelectorAll("main, [role='main']");
-          const hasMain = mainNodes.length > 0;
-          const landmarks = {
-            hasMain,
-            mainCount: mainNodes.length,
-            navCount: document.querySelectorAll("nav, [role='navigation']").length,
-            footerCount: document.querySelectorAll("footer, [role='contentinfo']").length,
-            headerCount: document.querySelectorAll("header, [role='banner']").length,
-            asideCount: document.querySelectorAll("aside, [role='complementary']").length,
-          };
-
-          return {
-            docTitle,
-            metaDesc,
-            canonicalTag,
-            h1Texts,
-            hOutline,
-            visWords,
-            mainWords,
-            forms,
-            images,
-            missingAlt,
-            landmarks,
-          };
-        });
-
-        await context.close();
+        } finally {
+          await context.close().catch(() => {});
+        }
 
         renderDecision.success = true;
 
