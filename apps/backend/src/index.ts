@@ -6,6 +6,7 @@ import { nanoid } from "nanoid";
 import { generatePdf } from "html-pdf-node";
 import { ReportGenerator } from "lighthouse/report/generator/report-generator.js";
 import { analyzeSite, AnalysisTimeoutError, calculateWeightedScore } from "./analysis";
+import { runSiteAuditCrawl } from "./crawler/engine";
 import { normalizeAuditUrl } from "./storage/lighthouse-store";
 import { saveShareRecord, getShareRecord } from "./storage/share-store";
 import type { ExportPayload, ModuleSnapshot } from "./types";
@@ -332,25 +333,108 @@ app.get("/api/events", (req, res) => {
   });
 });
 
-app.post("/api/analyze", async (req, res) => {
-  const { url, strategy, locale, skipCache } = req.body ?? {};
+const handleCrawlerAuditRequest = async (req: express.Request, res: express.Response) => {
+  const { url, maxPages, maxDepth, concurrency, allowSubdomains, respectRobotsTxt } = req.body ?? {};
   if (!url || typeof url !== "string") {
     return res.status(400).json({ error: "url is required" });
   }
 
   try {
-    const analysis = await analyzeSite({
-      url,
-      strategy,
-      locale,
-      skipCache: Boolean(skipCache),
+    sendEvent("crawler:start", { url });
+
+    const auditResult = await runSiteAuditCrawl({
+      seedUrl: url,
+      maxPages: Number(maxPages) || 50,
+      maxDepth: Number(maxDepth) || 5,
+      concurrency: Number(concurrency) || 5,
+      allowSubdomains: Boolean(allowSubdomains),
+      respectRobotsTxt: respectRobotsTxt !== false,
+      onProgress: (progress) => {
+        sendEvent("crawler:progress", progress);
+      },
     });
 
-    res.json(analysis);
+    console.log(`[API /api/crawler/audit FINAL CRAWL RESULT]`, {
+      auditId: auditResult.auditId,
+      pagesCount: auditResult.crawledPages.length,
+      issuesCount: auditResult.issues.length,
+      healthScore: auditResult.healthScore,
+    });
+
+    sendEvent("crawler:complete", auditResult);
+
+    sendEvent("toast", {
+      title: "Site Audit Complete",
+      description: `Crawled ${auditResult.inventory.totalCrawled} pages with Health Score ${auditResult.healthScore}/100.`,
+    });
+
+    return res.json(auditResult);
+  } catch (error) {
+    console.error("Site audit crawler error:", error);
+    return res.status(500).json({
+      error: "Unable to complete site audit crawl",
+      message: (error as Error).message,
+    });
+  }
+};
+
+app.post("/api/crawler/audit", handleCrawlerAuditRequest);
+app.post("/api/audit/crawl", handleCrawlerAuditRequest);
+
+app.post("/api/analyze", async (req, res) => {
+  const { url, strategy, locale, skipCache, maxPages } = req.body ?? {};
+  if (!url || typeof url !== "string") {
+    return res.status(400).json({ error: "url is required" });
+  }
+
+  const requestedMaxPages = Number(maxPages) > 0 ? Number(maxPages) : 50;
+  console.log(`[API /api/analyze] Starting analysis for ${url} | Requested maxPages: ${requestedMaxPages}`);
+
+  try {
+    sendEvent("crawler:start", { url });
+
+    // Run both single-page module audit and multi-page crawler concurrently
+    const [analysis, siteAudit] = await Promise.all([
+      analyzeSite({
+        url,
+        strategy,
+        locale,
+        skipCache: Boolean(skipCache),
+      }),
+      runSiteAuditCrawl({
+        seedUrl: url,
+        maxPages: requestedMaxPages,
+        maxDepth: 5,
+        concurrency: 5,
+        onProgress: (progress) => {
+          sendEvent("crawler:progress", progress);
+        },
+      }).catch((err) => {
+        console.error("Crawler error in /api/analyze:", err);
+        return null;
+      }),
+    ]);
+
+    if (siteAudit) {
+      console.log(`[API /api/analyze FINAL CRAWL RESULT]`, {
+        auditId: siteAudit.auditId,
+        pagesCount: siteAudit.crawledPages.length,
+        issuesCount: siteAudit.issues.length,
+        healthScore: siteAudit.healthScore,
+      });
+      sendEvent("crawler:complete", siteAudit);
+    }
+
+    const combinedResponse = {
+      ...analysis,
+      siteAudit,
+    };
+
+    res.json(combinedResponse);
 
     sendEvent("toast", {
       title: "Analysis complete",
-      description: `Finished auditing ${analysis.url}`,
+      description: `Finished auditing ${analysis.url} (${siteAudit?.inventory?.totalCrawled || 1} pages crawled)`,
     });
   } catch (error) {
     if (error instanceof AnalysisTimeoutError) {

@@ -9,7 +9,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "tsx apps/backend/src/index.ts",
+    "dev": "tsx watch apps/backend/src/index.ts",
     "build": "npm --workspace apps/backend run build",
     "start": "node apps/backend/dist/index.js"
   },

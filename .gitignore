@@ -16,3 +16,9 @@ apps/backend/.env
 Thumbs.db
 .idea/
 .vscode/
+
+# temporary run data
+apps/backend/data/
+data/
+*.log
+
