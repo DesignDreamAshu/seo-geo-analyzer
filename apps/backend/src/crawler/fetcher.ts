@@ -262,8 +262,7 @@ export function classifyBrowserPageState(
     titleLower.includes("404 - ") ||
     titleLower.startsWith("error 404") ||
     titleLower === "404" ||
-    titleLower.startsWith("404 error") ||
-    (navStatus === 404 && wordCount < 30);
+    titleLower.startsWith("404 error");
 
   const hasExplicitNotFoundHeading = headings.some((h) => {
     const hl = h.toLowerCase().trim();
@@ -280,13 +279,14 @@ export function classifyBrowserPageState(
   });
 
   const isShortErrorBody =
-    (combined.includes("page not found") ||
+    ((combined.includes("page not found") ||
       combined.includes("the page you were looking for doesn't exist") ||
       combined.includes("404 error") ||
       combined.includes("we can't seem to find the page") ||
       combined.includes("this page could not be found") ||
       combined.includes("the requested url was not found")) &&
-    wordCount < 120;
+      wordCount < 120) ||
+    ((combined.includes("404") || combined.includes("not found")) && wordCount < 30);
 
   const hasStrongNotFoundSignals = isExplicitNotFoundTitle || hasExplicitNotFoundHeading || isShortErrorBody;
 
