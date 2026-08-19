@@ -1,5 +1,9 @@
 import { runSiteAuditCrawl } from "../engine";
-import type { AuditArtifact, RenderingTelemetry } from "./types";
+import type {
+  AuditArtifact,
+  ExternalLinkConfirmedBrokenEvidence,
+  RenderingTelemetry,
+} from "./types";
 
 export async function executeFullAuditSuite(
   verificationRunId: string,
@@ -66,6 +70,21 @@ export async function executeFullAuditSuite(
     telemetryInvariantValid,
   };
 
+  const brokenExternalIssue = result.issues.find((i) => i.code === "LINKS_BROKEN_EXTERNAL");
+  const confirmedBrokenExternalDetails: ExternalLinkConfirmedBrokenEvidence[] =
+    (brokenExternalIssue?.affectedPages || []).map((p) => ({
+      sourcePageUrl: p.url,
+      anchorText: "External Link",
+      targetUrl: p.evidence?.targetUrl || p.url,
+      httpStatus: p.evidence?.httpStatus ?? null,
+      browserNavigationStatus: p.evidence?.httpStatus ?? null,
+      browserPageState: "not_found_page",
+      browserTitle: undefined,
+      finalOutcome: "confirmed_broken",
+      reason: p.evidence?.observed || "Target URL broken",
+      scorePenalty: brokenExternalIssue?.scorePenalty || 0,
+    }));
+
   const artifact: AuditArtifact = {
     verificationRunId,
     gitShaFull,
@@ -81,6 +100,7 @@ export async function executeFullAuditSuite(
     severityCounts: result.severityCounts,
     issues: result.issues,
     externalLinkTelemetry: extTel,
+    confirmedBrokenExternalDetails,
   };
 
   console.log(

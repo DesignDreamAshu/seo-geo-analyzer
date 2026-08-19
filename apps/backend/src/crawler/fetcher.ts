@@ -220,7 +220,7 @@ export function classifyBrowserPageState(
   headings: string[] = [],
 ): { pageState: BrowserPageState; isChallenge: boolean } {
   const combined = (pageTitle + " " + bodyText + " " + headings.join(" ")).toLowerCase();
-  const titleLower = pageTitle.toLowerCase();
+  const titleLower = pageTitle.toLowerCase().trim();
   const wordCount = bodyText.trim().split(/\s+/).filter(Boolean).length;
 
   // 1. Generic Bot Challenge / CAPTCHA / WAF Protection
@@ -255,40 +255,81 @@ export function classifyBrowserPageState(
     return { pageState: "login_wall", isChallenge: false };
   }
 
-  // 3. Genuine 404 / Gone Page (Generic pattern matching with high confidence)
+  // 3. Genuine 404 / Gone Page Detection (High-Confidence Explicit Signals)
   const isExplicitNotFoundTitle =
     titleLower.includes("404 not found") ||
     titleLower === "page not found" ||
     titleLower === "not found" ||
     titleLower.includes("404 - ") ||
-    titleLower.startsWith("error 404");
+    titleLower.startsWith("error 404") ||
+    titleLower === "404" ||
+    titleLower.startsWith("404 error");
 
-  const hasNotFoundHeading = headings.some((h) => {
+  const hasExplicitNotFoundHeading = headings.some((h) => {
     const hl = h.toLowerCase().trim();
-    return hl === "page not found" || hl === "404 - page not found" || hl === "404 not found" || hl === "error 404";
+    return (
+      hl === "page not found" ||
+      hl === "404 - page not found" ||
+      hl === "404 not found" ||
+      hl === "error 404" ||
+      hl === "404 error" ||
+      hl === "page does not exist" ||
+      hl === "page cannot be found" ||
+      hl === "we can't seem to find that page"
+    );
   });
 
   const isShortErrorBody =
     (combined.includes("page not found") ||
       combined.includes("the page you were looking for doesn't exist") ||
       combined.includes("404 error") ||
-      combined.includes("we can't seem to find the page")) &&
+      combined.includes("we can't seem to find the page") ||
+      combined.includes("this page could not be found") ||
+      combined.includes("the requested url was not found")) &&
     wordCount < 120;
 
-  if (navStatus === 404 || isExplicitNotFoundTitle || hasNotFoundHeading || isShortErrorBody) {
+  const hasStrongNotFoundSignals = isExplicitNotFoundTitle || hasExplicitNotFoundHeading || isShortErrorBody;
+
+  // 4. Substantial Valid Rendered Destination Detection (SPAs, Store Pages, Content Portals)
+  const hasMeaningfulTitle = Boolean(pageTitle && pageTitle.trim().length >= 3 && !isExplicitNotFoundTitle);
+  const hasMeaningfulHeadings = headings.some((h) => {
+    const hl = h.toLowerCase().trim();
+    return (
+      hl.length >= 3 &&
+      !hl.includes("404") &&
+      !hl.includes("not found") &&
+      !hl.includes("error") &&
+      !hl.includes("access denied")
+    );
+  });
+  const hasMeaningfulContent = wordCount >= 15;
+  const hasSubstantialBody = wordCount >= 50;
+
+  const hasStrongValidPageEvidence =
+    !hasStrongNotFoundSignals && (hasSubstantialBody || (hasMeaningfulContent && (hasMeaningfulTitle || hasMeaningfulHeadings)));
+
+  // 5. Evidence Fusion Resolution
+  if (hasStrongNotFoundSignals) {
+    if (navStatus === 200) {
+      return { pageState: "soft_404_candidate", isChallenge: false };
+    }
     return { pageState: "not_found_page", isChallenge: false };
   }
 
-  // 4. Empty / Unrendered Shell
+  if (hasStrongValidPageEvidence) {
+    // Rendered DOM proves valid reachable destination regardless of initial navigation status
+    return { pageState: "valid_page", isChallenge: false };
+  }
+
   if (wordCount < 10 && navStatus === 200) {
     return { pageState: "empty_shell", isChallenge: false };
   }
 
-  // 5. Valid Rendered Destination
   if (navStatus && navStatus >= 200 && navStatus < 400 && wordCount >= 10) {
     return { pageState: "valid_page", isChallenge: false };
   }
 
+  // Ambiguous DOM with status 404 or other status without explicit not-found signals -> unknown/inconclusive
   return { pageState: "unknown", isChallenge: false };
 }
 

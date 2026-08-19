@@ -1,5 +1,5 @@
 import type { BrowserVerificationCapability, DiagnosticIssue, ExternalLinkTelemetry } from "../types";
-import type { VerificationGitState } from "./git-info";
+import type { GitProvenance, RawGitCommandEvidence, VerificationGitState } from "./git-info";
 
 export interface VerificationEnvironment {
   nodeVersion: string;
@@ -12,7 +12,7 @@ export interface VerificationEnvironment {
   lockfilePlaywrightVersion?: string;
   runtimePlaywrightVersion: string;
   playwrightVersionMatchesDeclared: boolean;
-  playwrightVersion: string; // compatibility alias
+  playwrightVersion: string;
   isRender: boolean;
 }
 
@@ -29,6 +29,7 @@ export interface VerificationRunHeader {
   remoteVerified: boolean;
   verificationGitState: VerificationGitState;
   environment: VerificationEnvironment;
+  gitEvidence: RawGitCommandEvidence;
 }
 
 export interface BrowserCapabilityArtifact {
@@ -64,11 +65,17 @@ export interface FieldParityStat {
 export interface RuleAccuracyMetric {
   ruleCode: string;
   totalEvaluatedPages: number;
+  eligibleCrawlerPages: number;
+  eligibleBrowserPages: number;
+  comparablePages: number;
   truePositives: number;
   falsePositives: number;
   trueNegatives: number;
   falseNegatives: number;
+  inconclusive: number;
   status: "MEASURED" | "NOT_EVALUATED";
+  falsePositiveUrls: string[];
+  falseNegativeUrls: string[];
   notes?: string;
 }
 
@@ -137,12 +144,31 @@ export interface RenderDecisionSample {
 
 export interface RenderTriggerAccuracyMetric {
   targetUrlsCount: number;
-  truePositives: number;
-  trueNegatives: number;
-  falsePositives: number;
-  falseNegatives: number;
-  precisionPercent: number;
-  recallPercent: number;
+  factDifferenceTriggerRecall: number;
+  factDifferencePrecision: number;
+  diagnosticImpactTriggerRecall: number;
+  diagnosticImpactPrecision: number;
+  factDiff_TP: number;
+  factDiff_TN: number;
+  factDiff_FP: number;
+  factDiff_FN: number;
+  diagImpact_TP: number;
+  diagImpact_TN: number;
+  diagImpact_FP: number;
+  diagImpact_FN: number;
+}
+
+export interface ExternalLinkConfirmedBrokenEvidence {
+  sourcePageUrl: string;
+  anchorText: string;
+  targetUrl: string;
+  httpStatus: number | null;
+  browserNavigationStatus?: number | null;
+  browserPageState?: string;
+  browserTitle?: string;
+  finalOutcome: string;
+  reason: string;
+  scorePenalty: number;
 }
 
 export interface ParityArtifact {
@@ -154,6 +180,7 @@ export interface ParityArtifact {
   renderTriggerAccuracy: RenderTriggerAccuracyMetric;
   renderDecisionSamples: RenderDecisionSample[];
   ruleMetrics: RuleAccuracyMetric[];
+  externalConfirmedBrokenDetails: ExternalLinkConfirmedBrokenEvidence[];
 }
 
 export interface DisputedUrlStabilityProbe {
@@ -214,6 +241,7 @@ export interface AuditArtifact {
   };
   issues: DiagnosticIssue[];
   externalLinkTelemetry: ExternalLinkTelemetry;
+  confirmedBrokenExternalDetails: ExternalLinkConfirmedBrokenEvidence[];
 }
 
 export interface ReleaseManifestEntry {
@@ -269,7 +297,14 @@ export interface DeploymentVerificationArtifact {
 
 export interface MultiDimensionalReleaseStatus {
   buildVerificationStatus: "PASS" | "FAIL";
-  accuracyVerificationStatus: "PASS" | "NEEDS_REVIEW" | "FAIL";
+  environmentVerificationStatus: "MATCH" | "MISMATCH";
+  provenanceVerificationStatus:
+    | "REMOTE_VERIFIED"
+    | "LOCAL_ONLY"
+    | "REMOTE_REPOSITORY_MISMATCH"
+    | "PROVENANCE_NOT_VERIFIED";
+  factParityStatus: "FACT_PARITY_PASS" | "FACT_PARITY_WITH_WARNINGS" | "FACT_PARITY_FAIL";
+  diagnosticAccuracyStatus: "DIAGNOSTIC_ACCURACY_PASS" | "NEEDS_REVIEW" | "FAIL";
   localReleaseStatus: "VERIFIED_PASS" | "VERIFIED_WITH_WARNINGS" | "FAILED";
   productionDeploymentStatus: DeploymentStatusClassification;
 }
@@ -285,9 +320,13 @@ export interface ReleaseVerificationReport {
   verificationGitState: VerificationGitState;
   generatedAt: string;
   statuses: MultiDimensionalReleaseStatus;
-  overallStatus: "VERIFIED_PASS" | "VERIFIED_WITH_WARNINGS" | "FAILED"; // compatibility alias for localReleaseStatus
+  overallStatus: "VERIFIED_PASS" | "VERIFIED_WITH_WARNINGS" | "FAILED";
   summary: {
     buildStatus: "PASS" | "FAIL";
+    environmentStatus: "MATCH" | "MISMATCH";
+    provenanceStatus: string;
+    factParityStatus: string;
+    diagnosticAccuracyStatus: string;
     browserCapability: BrowserVerificationCapability;
     rawParityComparableRate: number;
     productionParityComparableRate: number;
@@ -301,6 +340,7 @@ export interface ReleaseVerificationReport {
     indexablePages: number;
     renderedPagesCount: number;
     renderTriggerRecallPercent: number;
+    diagnosticImpactTriggerRecallPercent: number;
     terminationReason: string;
     totalIssues: number;
     criticalIssues: number;
@@ -314,6 +354,7 @@ export interface ReleaseVerificationReport {
     telemetryArithmeticValid: boolean;
     scoreDeductionsValid: boolean;
     renderDecisionTelemetryValid: boolean;
+    rawGitEvidenceReconciled: boolean;
   };
   provenance: {
     gitShaFull: string;
@@ -325,6 +366,7 @@ export interface ReleaseVerificationReport {
     commitTimestamp?: string;
     commitAuthor?: string;
     commitMessage?: string;
+    gitEvidence: RawGitCommandEvidence;
   };
   environment: VerificationEnvironment;
   browserCapability: BrowserCapabilityArtifact;

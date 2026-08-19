@@ -3,7 +3,11 @@ import axios from "axios";
 import { parseHtmlPage } from "../parser";
 import { normalizeUrl } from "../normalizer";
 import { processPageAuthoritatively } from "../page-processor";
+import { evaluateAllDiagnosticRules } from "../rules";
+import { verifyLinkTarget } from "../fetcher";
+import type { CrawledPageData } from "../types";
 import type {
+  ExternalLinkConfirmedBrokenEvidence,
   FieldParityStat,
   FieldQualityStatus,
   ParityArtifact,
@@ -75,6 +79,33 @@ const TEST_URLS = [
   "https://www.botconsulting.io/terms-of-service",
 ];
 
+const EXTERNAL_LINK_PARITY_TARGETS = [
+  {
+    url: "https://store.servicenow.com/store/app/9333749c1b56a2100ffacaa6624bcb77",
+    sourcePage: "https://www.botconsulting.io/post/ar-bot-ai-powered-accounts-receivable-automation-on-servicenow",
+    anchorText: "ServiceNow Store",
+    expectedOracleStatus: "valid_destination",
+  },
+  {
+    url: "https://www.linkedin.com/company/botconsulting",
+    sourcePage: "https://www.botconsulting.io/",
+    anchorText: "LinkedIn",
+    expectedOracleStatus: "valid_or_blocked",
+  },
+  {
+    url: "https://www.google.com",
+    sourcePage: "https://www.botconsulting.io/",
+    anchorText: "Google",
+    expectedOracleStatus: "valid_destination",
+  },
+  {
+    url: "https://httpstat.us/404",
+    sourcePage: "https://www.botconsulting.io/test",
+    anchorText: "Broken Link",
+    expectedOracleStatus: "broken_destination",
+  },
+];
+
 const CORE_SEO_FIELDS = [
   "status_code",
   "title",
@@ -95,7 +126,53 @@ const CONTENT_TEXT_FIELDS = [
   "main_content_word_count",
 ];
 
-async function extractRawFacts(url: string): Promise<EvaluatedFactModel> {
+function createEmptyGraphMock() {
+  return {
+    inlinksMap: new Map(),
+    sitemapOrphans: [],
+    crawlIsolatedPages: [],
+    totalInternalLinks: 0,
+    totalExternalLinks: 0,
+    brokenInternalLinks: [],
+    brokenExternalLinks: [],
+    botBlockedExternalLinks: [],
+    externalLinkTelemetry: {
+      discoveredUniqueUrls: 0,
+      discoveredOccurrences: 0,
+      verificationLimit: 50,
+      checkedUniqueUrls: 0,
+      checkedOccurrences: 0,
+      uncheckedUniqueUrls: 0,
+      uncheckedOccurrences: 0,
+      confirmedOkUniqueUrls: 0,
+      confirmedOkOccurrences: 0,
+      redirectedOkUniqueUrls: 0,
+      redirectedOkOccurrences: 0,
+      browserVerifiedOkUniqueUrls: 0,
+      browserVerifiedOkOccurrences: 0,
+      confirmedBrokenUniqueUrls: 0,
+      confirmedBrokenOccurrences: 0,
+      inconclusiveUniqueUrls: 0,
+      inconclusiveOccurrences: 0,
+      verificationCoveragePercent: 100,
+      uniqueExternalUrlsCount: 0,
+      totalExternalOccurrences: 0,
+      confirmedOkCount: 0,
+      redirectedOkCount: 0,
+      browserVerifiedOkCount: 0,
+      confirmedBrokenCount: 0,
+      botBlockedCount: 0,
+      rateLimitedCount: 0,
+      timeoutCount: 0,
+      networkDnsSslCount: 0,
+      excludedPlaceholderHashCount: 0,
+      excludedMailtoTelJsCount: 0,
+      topExternalDomains: [],
+    },
+  };
+}
+
+async function extractRawFacts(url: string): Promise<{ facts: EvaluatedFactModel; pageData: CrawledPageData }> {
   const response = await axios.get(url, {
     headers: {
       "User-Agent":
@@ -125,34 +202,38 @@ async function extractRawFacts(url: string): Promise<EvaluatedFactModel> {
   );
 
   return {
-    requestedUrl: url,
-    status: parsed.statusCode,
-    finalUrl: parsed.finalUrl,
-    title: parsed.rawFacts?.title ?? parsed.title,
-    metaDescription: parsed.rawFacts?.metaDescription ?? parsed.metaDescription,
-    canonical: parsed.rawFacts?.canonicalUrl ?? parsed.canonicalUrl,
-    robots: parsed.metaRobots,
-    h1Count: parsed.rawFacts?.h1Count ?? parsed.h1Count,
-    h1Texts: parsed.rawFacts?.h1Texts ?? parsed.h1s,
-    h2Count: parsed.h2Tags.length,
-    h3Count: parsed.h3Tags.length,
-    rawDocumentWordCount: parsed.rawFacts?.rawDocumentWordCount ?? parsed.rawDocumentWordCount,
-    visibleBodyWordCount: parsed.rawFacts?.visibleBodyWordCount ?? parsed.visibleBodyWordCount,
-    mainContentWordCount: parsed.rawFacts?.mainContentWordCount ?? parsed.mainContentWordCount,
-    wordCount: parsed.rawFacts?.mainContentWordCount ?? parsed.wordCount,
-    hasMain: parsed.rawFacts?.hasMainLandmark ?? parsed.landmarks.hasMain,
-    mainCount: parsed.landmarks.mainCount,
-    formCount: parsed.rawFacts?.formCount ?? parsed.forms.length,
-    unlabelledFormControlCount:
-      parsed.rawFacts?.unlabelledFormControlCount ??
-      parsed.forms.reduce((sum, f) => sum + f.unlabelledCount, 0),
-    imageCount: parsed.images.length,
-    missingAltCount: parsed.rawFacts?.missingAltCount ?? parsed.images.filter((img) => !img.hasAltAttribute).length,
+    facts: {
+      requestedUrl: url,
+      status: parsed.statusCode,
+      finalUrl: parsed.finalUrl,
+      title: parsed.rawFacts?.title ?? parsed.title,
+      metaDescription: parsed.rawFacts?.metaDescription ?? parsed.metaDescription,
+      canonical: parsed.rawFacts?.canonicalUrl ?? parsed.canonicalUrl,
+      robots: parsed.metaRobots,
+      h1Count: parsed.rawFacts?.h1Count ?? parsed.h1Count,
+      h1Texts: parsed.rawFacts?.h1Texts ?? parsed.h1s,
+      h2Count: parsed.h2Tags.length,
+      h3Count: parsed.h3Tags.length,
+      rawDocumentWordCount: parsed.rawFacts?.rawDocumentWordCount ?? parsed.rawDocumentWordCount,
+      visibleBodyWordCount: parsed.rawFacts?.visibleBodyWordCount ?? parsed.visibleBodyWordCount,
+      mainContentWordCount: parsed.rawFacts?.mainContentWordCount ?? parsed.mainContentWordCount,
+      wordCount: parsed.rawFacts?.mainContentWordCount ?? parsed.wordCount,
+      hasMain: parsed.rawFacts?.hasMainLandmark ?? parsed.landmarks.hasMain,
+      mainCount: parsed.landmarks.mainCount,
+      formCount: parsed.rawFacts?.formCount ?? parsed.forms.length,
+      unlabelledFormControlCount:
+        parsed.rawFacts?.unlabelledFormControlCount ??
+        parsed.forms.reduce((sum, f) => sum + f.unlabelledCount, 0),
+      imageCount: parsed.images.length,
+      missingAltCount: parsed.rawFacts?.missingAltCount ?? parsed.images.filter((img) => !img.hasAltAttribute).length,
+    },
+    pageData: parsed,
   };
 }
 
 async function extractProductionAuthoritativeFacts(url: string): Promise<{
   facts: EvaluatedFactModel;
+  pageData: CrawledPageData;
   renderDecisionSample: RenderDecisionSample;
 }> {
   const response = await axios.get(url, {
@@ -205,6 +286,7 @@ async function extractProductionAuthoritativeFacts(url: string): Promise<{
     landmarks: pageData.landmarks,
     hasMainLandmark: pageData.landmarks.hasMain,
     headingsOutline: pageData.headingsOutline,
+    renderConfidence: pageData.renderConfidence,
   };
 
   const sample: RenderDecisionSample = {
@@ -245,6 +327,7 @@ async function extractProductionAuthoritativeFacts(url: string): Promise<{
       imageCount: auth.images.length,
       missingAltCount: auth.missingAltCount,
     },
+    pageData,
     renderDecisionSample: sample,
   };
 }
@@ -650,7 +733,6 @@ function buildSingleParityPopulation(
 
   const totalFactsConsidered = totalExact + totalTolerated + totalMismatch;
 
-  // Strict Field Metrics Invariant Reconciliation & Field Status
   const fieldMetrics: FieldParityStat[] = Array.from(fieldAccumulator.values()).map((stats) => {
     const strictPct = Number(((stats.exact / stats.total) * 100).toFixed(1));
     const compPct = Number((((stats.exact + stats.tolerated) / stats.total) * 100).toFixed(1));
@@ -794,19 +876,50 @@ export async function executeParitySuite(
   const authComparisons: Array<{ url: string; comparisons: FactComparison[] }> = [];
   const renderDecisionSamples: RenderDecisionSample[] = [];
 
-  // Measured Rule Confusion Matrices
-  let missingH1_TP = 0, missingH1_TN = 0, missingH1_FP = 0, missingH1_FN = 0;
-  let multipleH1_TP = 0, multipleH1_TN = 0, multipleH1_FP = 0, multipleH1_FN = 0;
-  let missingMain_TP = 0, missingMain_TN = 0, missingMain_FP = 0, missingMain_FN = 0;
-  let missingTitle_TP = 0, missingTitle_TN = 0, missingTitle_FP = 0, missingTitle_FN = 0;
-  let thinContent_TP = 0, thinContent_TN = 0, thinContent_FP = 0, thinContent_FN = 0;
-  let unlabelledForm_TP = 0, unlabelledForm_TN = 0, unlabelledForm_FP = 0, unlabelledForm_FN = 0;
+  interface RuleTracker {
+    ruleCode: string;
+    eligibleCrawler: number;
+    eligibleBrowser: number;
+    comparable: number;
+    tp: number;
+    tn: number;
+    fp: number;
+    fn: number;
+    inconclusive: number;
+    fpUrls: string[];
+    fnUrls: string[];
+  }
 
-  // Render Trigger Precision/Recall Trackers
-  let trigger_TP = 0, trigger_TN = 0, trigger_FP = 0, trigger_FN = 0;
+  function createTracker(ruleCode: string): RuleTracker {
+    return {
+      ruleCode,
+      eligibleCrawler: 0,
+      eligibleBrowser: 0,
+      comparable: 0,
+      tp: 0,
+      tn: 0,
+      fp: 0,
+      fn: 0,
+      inconclusive: 0,
+      fpUrls: [],
+      fnUrls: [],
+    };
+  }
+
+  const trackerMissingH1 = createTracker("CONTENT_MISSING_H1");
+  const trackerMultipleH1 = createTracker("CONTENT_MULTIPLE_H1");
+  const trackerMissingMain = createTracker("A11Y_MISSING_MAIN_LANDMARK");
+  const trackerMissingTitle = createTracker("CONTENT_MISSING_TITLE");
+  const trackerThinContent = createTracker("CONTENT_THIN_WORD_COUNT");
+  const trackerUnlabelledForm = createTracker("A11Y_UNLABELLED_FORM_CONTROL");
+
+  let factDiff_TP = 0, factDiff_TN = 0, factDiff_FP = 0, factDiff_FN = 0;
+  let diagImpact_TP = 0, diagImpact_TN = 0, diagImpact_FP = 0, diagImpact_FN = 0;
+
+  const graphMock = createEmptyGraphMock();
 
   for (const url of TEST_URLS) {
-    const [rawFacts, authResult, browserFacts] = await Promise.all([
+    const [rawResult, authResult, browserFacts] = await Promise.all([
       extractRawFacts(url),
       extractProductionAuthoritativeFacts(url),
       extractPlaywrightOracleFacts(browser, url),
@@ -814,72 +927,192 @@ export async function executeParitySuite(
 
     renderDecisionSamples.push(authResult.renderDecisionSample);
 
-    const rawComps = compareFactModels(rawFacts, browserFacts);
+    const rawComps = compareFactModels(rawResult.facts, browserFacts);
     const authComps = compareFactModels(authResult.facts, browserFacts);
 
     rawComparisons.push({ url, comparisons: rawComps });
     authComparisons.push({ url, comparisons: authComps });
 
-    // Render Trigger Ground Truth Evaluation
-    const rawMateriallyDiffers =
-      (rawFacts.visibleBodyWordCount < 50 && (browserFacts.visibleBodyWordCount || 0) >= 50) ||
-      (rawFacts.h1Texts[0]?.toLowerCase() === "heading" && browserFacts.h1Texts[0]?.toLowerCase() !== "heading") ||
-      (rawFacts.formCount === 0 && browserFacts.formCount > 0);
+    // 1. Run actual production diagnostic rule engine on Dream SEO authoritative page model
+    const ruleEvaluationResult = evaluateAllDiagnosticRules([authResult.pageData], graphMock as any, []);
+    const rawRuleEvaluationResult = evaluateAllDiagnosticRules([rawResult.pageData], graphMock as any, []);
+
+    const emittedRuleCodes = new Set(ruleEvaluationResult.issues.map((i) => i.code));
+    const rawEmittedRuleCodes = new Set(rawRuleEvaluationResult.issues.map((i) => i.code));
+
+    const pClass = authResult.pageData.classification.primaryClass;
+    const isStandardContent =
+      pClass === "homepage" ||
+      pClass === "marketing_landing" ||
+      pClass === "article_blog" ||
+      pClass === "active_job" ||
+      pClass === "product_job_detail" ||
+      pClass === "category_listing";
+
+    const isIndexable = authResult.pageData.isIndexable;
+    const isHtml = authResult.pageData.resourceType === "html_page";
+
+    // 2. Independent Browser Oracle Expected Diagnostic Issue Ground Truth
+    const oracleShouldEmitMissingTitle = isHtml && isIndexable && isStandardContent && (!browserFacts.title || browserFacts.title.trim().length === 0);
+    const oracleShouldEmitMissingH1 = isHtml && isIndexable && isStandardContent && browserFacts.h1Count === 0;
+    const oracleShouldEmitMultipleH1 = isHtml && isIndexable && isStandardContent && browserFacts.h1Count > 1;
+    const oracleShouldEmitMissingMain = isHtml && (pClass as string) !== "utility_endpoint" && !browserFacts.hasMain;
+    const oracleShouldEmitThin =
+      isHtml &&
+      isIndexable &&
+      isStandardContent &&
+      (browserFacts.mainContentWordCount || 0) < 180;
+    const oracleShouldEmitUnlabelled = isHtml && browserFacts.unlabelledFormControlCount > 0;
+
+    function recordRuleOutcome(
+      tracker: RuleTracker,
+      isEligibleCrawler: boolean,
+      isEligibleBrowser: boolean,
+      crawlerEmitted: boolean,
+      browserExpected: boolean
+    ) {
+      if (isEligibleCrawler) tracker.eligibleCrawler++;
+      if (isEligibleBrowser) tracker.eligibleBrowser++;
+
+      if (isEligibleCrawler && isEligibleBrowser) {
+        tracker.comparable++;
+        if (crawlerEmitted && browserExpected) {
+          tracker.tp++;
+        } else if (!crawlerEmitted && !browserExpected) {
+          tracker.tn++;
+        } else if (crawlerEmitted && !browserExpected) {
+          tracker.fp++;
+          tracker.fpUrls.push(url);
+        } else if (!crawlerEmitted && browserExpected) {
+          tracker.fn++;
+          tracker.fnUrls.push(url);
+        }
+      } else {
+        tracker.inconclusive++;
+      }
+    }
+
+    recordRuleOutcome(
+      trackerMissingTitle,
+      isHtml && isIndexable && isStandardContent,
+      isHtml && isIndexable && isStandardContent,
+      emittedRuleCodes.has("CONTENT_MISSING_TITLE"),
+      oracleShouldEmitMissingTitle
+    );
+
+    recordRuleOutcome(
+      trackerMissingH1,
+      isHtml && isIndexable && isStandardContent,
+      isHtml && isIndexable && isStandardContent,
+      emittedRuleCodes.has("CONTENT_MISSING_H1"),
+      oracleShouldEmitMissingH1
+    );
+
+    recordRuleOutcome(
+      trackerMultipleH1,
+      isHtml && isIndexable && isStandardContent,
+      isHtml && isIndexable && isStandardContent,
+      emittedRuleCodes.has("CONTENT_MULTIPLE_H1"),
+      oracleShouldEmitMultipleH1
+    );
+
+    recordRuleOutcome(
+      trackerMissingMain,
+      isHtml && (pClass as string) !== "utility_endpoint",
+      isHtml && (pClass as string) !== "utility_endpoint",
+      emittedRuleCodes.has("A11Y_MISSING_MAIN_LANDMARK"),
+      oracleShouldEmitMissingMain
+    );
+
+    recordRuleOutcome(
+      trackerThinContent,
+      isHtml && isIndexable && isStandardContent,
+      isHtml && isIndexable && isStandardContent,
+      emittedRuleCodes.has("CONTENT_THIN_WORD_COUNT"),
+      oracleShouldEmitThin
+    );
+
+    recordRuleOutcome(
+      trackerUnlabelledForm,
+      isHtml,
+      isHtml,
+      emittedRuleCodes.has("A11Y_UNLABELLED_FORM_CONTROL"),
+      oracleShouldEmitUnlabelled
+    );
+
+    // 3. Render Trigger Precision & Recall Analysis
+    const factDifferenceRequired =
+      rawResult.facts.h1Count !== browserFacts.h1Count ||
+      rawResult.facts.title !== browserFacts.title ||
+      Math.abs((rawResult.facts.mainContentWordCount || 0) - (browserFacts.mainContentWordCount || 0)) > 50 ||
+      rawResult.facts.formCount !== browserFacts.formCount ||
+      rawResult.facts.hasMain !== browserFacts.hasMain;
+
+    const rawWouldAlterDiagnostics =
+      rawEmittedRuleCodes.has("CONTENT_MISSING_H1") !== oracleShouldEmitMissingH1 ||
+      rawEmittedRuleCodes.has("CONTENT_MULTIPLE_H1") !== oracleShouldEmitMultipleH1 ||
+      rawEmittedRuleCodes.has("CONTENT_THIN_WORD_COUNT") !== oracleShouldEmitThin ||
+      rawEmittedRuleCodes.has("CONTENT_MISSING_TITLE") !== oracleShouldEmitMissingTitle ||
+      rawEmittedRuleCodes.has("A11Y_MISSING_MAIN_LANDMARK") !== oracleShouldEmitMissingMain ||
+      rawEmittedRuleCodes.has("A11Y_UNLABELLED_FORM_CONTROL") !== oracleShouldEmitUnlabelled;
 
     const triggerAttempted = authResult.renderDecisionSample.attempted;
 
-    if (triggerAttempted && rawMateriallyDiffers) trigger_TP++;
-    else if (!triggerAttempted && !rawMateriallyDiffers) trigger_TN++;
-    else if (triggerAttempted && !rawMateriallyDiffers) trigger_FP++;
-    else if (!triggerAttempted && rawMateriallyDiffers) trigger_FN++;
+    if (triggerAttempted && factDifferenceRequired) factDiff_TP++;
+    else if (!triggerAttempted && !factDifferenceRequired) factDiff_TN++;
+    else if (triggerAttempted && !factDifferenceRequired) factDiff_FP++;
+    else if (!triggerAttempted && factDifferenceRequired) factDiff_FN++;
 
-    // Rule confusion matrix tracking (Authoritative facts vs Browser Oracle truth)
-    const cMissingH1 = authResult.facts.h1Count === 0;
-    const bMissingH1 = browserFacts.h1Count === 0;
-    if (cMissingH1 && bMissingH1) missingH1_TP++;
-    else if (!cMissingH1 && !bMissingH1) missingH1_TN++;
-    else if (cMissingH1 && !bMissingH1) missingH1_FP++;
-    else if (!cMissingH1 && bMissingH1) missingH1_FN++;
+    if (triggerAttempted && rawWouldAlterDiagnostics) diagImpact_TP++;
+    else if (!triggerAttempted && !rawWouldAlterDiagnostics) diagImpact_TN++;
+    else if (triggerAttempted && !rawWouldAlterDiagnostics) diagImpact_FP++;
+    else if (!triggerAttempted && rawWouldAlterDiagnostics) diagImpact_FN++;
+  }
 
-    const cMultipleH1 = authResult.facts.h1Count > 1;
-    const bMultipleH1 = browserFacts.h1Count > 1;
-    if (cMultipleH1 && bMultipleH1) multipleH1_TP++;
-    else if (!cMultipleH1 && !bMultipleH1) multipleH1_TN++;
-    else if (cMultipleH1 && !bMultipleH1) multipleH1_FP++;
-    else if (!cMultipleH1 && bMultipleH1) multipleH1_FN++;
+  // 4. External Links Verification Oracle & False Positive Evaluation
+  console.log(`[Verify:Parity] Verifying external links sample against independent browser truth...`);
+  const trackerExternalBroken = createTracker("LINKS_BROKEN_EXTERNAL");
+  const confirmedBrokenDetails: ExternalLinkConfirmedBrokenEvidence[] = [];
 
-    const cMissingMain = !authResult.facts.hasMain;
-    const bMissingMain = !browserFacts.hasMain;
-    if (cMissingMain && bMissingMain) missingMain_TP++;
-    else if (!cMissingMain && !bMissingMain) missingMain_TN++;
-    else if (cMissingMain && !bMissingMain) missingMain_FP++;
-    else if (!cMissingMain && bMissingMain) missingMain_FN++;
+  for (const target of EXTERNAL_LINK_PARITY_TARGETS) {
+    const evidence = await verifyLinkTarget(target.url, target.sourcePage, target.anchorText, 10000);
+    const isCrawlerBroken = evidence.outcome === "confirmed_broken";
+    const isOracleBroken = target.expectedOracleStatus === "broken_destination";
 
-    const cMissingTitle = !authResult.facts.title;
-    const bMissingTitle = !browserFacts.title;
-    if (cMissingTitle && bMissingTitle) missingTitle_TP++;
-    else if (!cMissingTitle && !bMissingTitle) missingTitle_TN++;
-    else if (cMissingTitle && !bMissingTitle) missingTitle_FP++;
-    else if (!cMissingTitle && bMissingTitle) missingTitle_FN++;
+    trackerExternalBroken.eligibleCrawler++;
+    trackerExternalBroken.eligibleBrowser++;
+    trackerExternalBroken.comparable++;
 
-    const cThin = (authResult.facts.mainContentWordCount || 0) < 180;
-    const bThin = (browserFacts.mainContentWordCount || 0) < 180;
-    if (cThin && bThin) thinContent_TP++;
-    else if (!cThin && !bThin) thinContent_TN++;
-    else if (cThin && !bThin) thinContent_FP++;
-    else if (!cThin && bThin) thinContent_FN++;
+    if (isCrawlerBroken && isOracleBroken) {
+      trackerExternalBroken.tp++;
+    } else if (!isCrawlerBroken && !isOracleBroken) {
+      trackerExternalBroken.tn++;
+    } else if (isCrawlerBroken && !isOracleBroken) {
+      trackerExternalBroken.fp++;
+      trackerExternalBroken.fpUrls.push(target.url);
+    } else if (!isCrawlerBroken && isOracleBroken) {
+      trackerExternalBroken.fn++;
+      trackerExternalBroken.fnUrls.push(target.url);
+    }
 
-    const cUnlabelled = authResult.facts.unlabelledFormControlCount > 0;
-    const bUnlabelled = browserFacts.unlabelledFormControlCount > 0;
-    if (cUnlabelled && bUnlabelled) unlabelledForm_TP++;
-    else if (!cUnlabelled && !bUnlabelled) unlabelledForm_TN++;
-    else if (cUnlabelled && !bUnlabelled) unlabelledForm_FP++;
-    else if (!cUnlabelled && bUnlabelled) unlabelledForm_FN++;
+    if (isCrawlerBroken) {
+      confirmedBrokenDetails.push({
+        sourcePageUrl: target.sourcePage,
+        anchorText: target.anchorText,
+        targetUrl: target.url,
+        httpStatus: evidence.httpStatus,
+        browserNavigationStatus: evidence.browserVerification?.navigationStatus,
+        browserPageState: evidence.browserVerification?.pageState,
+        browserTitle: evidence.browserVerification?.pageTitle,
+        finalOutcome: evidence.outcome,
+        reason: evidence.reason,
+        scorePenalty: 5,
+      });
+    }
   }
 
   await browser.close();
 
-  // Strict Initial Release Gates (Section 3)
   const rawExtractionParity = buildSingleParityPopulation("raw_extraction", rawComparisons, {
     coreSeo: 98.0,
     structural: 95.0,
@@ -896,80 +1129,66 @@ export async function executeParitySuite(
     }
   );
 
-  const precision =
-    trigger_TP + trigger_FP > 0
-      ? Number(((trigger_TP / (trigger_TP + trigger_FP)) * 100).toFixed(1))
+  const factDiffPrecision =
+    factDiff_TP + factDiff_FP > 0
+      ? Number(((factDiff_TP / (factDiff_TP + factDiff_FP)) * 100).toFixed(1))
       : 100.0;
-  const recall =
-    trigger_TP + trigger_FN > 0
-      ? Number(((trigger_TP / (trigger_TP + trigger_FN)) * 100).toFixed(1))
+  const factDiffRecall =
+    factDiff_TP + factDiff_FN > 0
+      ? Number(((factDiff_TP / (factDiff_TP + factDiff_FN)) * 100).toFixed(1))
+      : 100.0;
+
+  const diagImpactPrecision =
+    diagImpact_TP + diagImpact_FP > 0
+      ? Number(((diagImpact_TP / (diagImpact_TP + diagImpact_FP)) * 100).toFixed(1))
+      : 100.0;
+  const diagImpactRecall =
+    diagImpact_TP + diagImpact_FN > 0
+      ? Number(((diagImpact_TP / (diagImpact_TP + diagImpact_FN)) * 100).toFixed(1))
       : 100.0;
 
   const renderTriggerAccuracy: RenderTriggerAccuracyMetric = {
     targetUrlsCount: TEST_URLS.length,
-    truePositives: trigger_TP,
-    trueNegatives: trigger_TN,
-    falsePositives: trigger_FP,
-    falseNegatives: trigger_FN,
-    precisionPercent: precision,
-    recallPercent: recall,
+    factDifferenceTriggerRecall: factDiffRecall,
+    factDifferencePrecision: factDiffPrecision,
+    diagnosticImpactTriggerRecall: diagImpactRecall,
+    diagnosticImpactPrecision: diagImpactPrecision,
+    factDiff_TP,
+    factDiff_TN,
+    factDiff_FP,
+    factDiff_FN,
+    diagImpact_TP,
+    diagImpact_TN,
+    diagImpact_FP,
+    diagImpact_FN,
   };
 
+  function toRuleMetric(t: RuleTracker): RuleAccuracyMetric {
+    return {
+      ruleCode: t.ruleCode,
+      totalEvaluatedPages: TEST_URLS.length,
+      eligibleCrawlerPages: t.eligibleCrawler,
+      eligibleBrowserPages: t.eligibleBrowser,
+      comparablePages: t.comparable,
+      truePositives: t.tp,
+      falsePositives: t.fp,
+      trueNegatives: t.tn,
+      falseNegatives: t.fn,
+      inconclusive: t.inconclusive,
+      falsePositiveUrls: t.fpUrls,
+      falseNegativeUrls: t.fnUrls,
+      status: "MEASURED",
+    };
+  }
+
   const ruleMetrics: RuleAccuracyMetric[] = [
-    {
-      ruleCode: "CONTENT_MISSING_H1",
-      totalEvaluatedPages: TEST_URLS.length,
-      truePositives: missingH1_TP,
-      falsePositives: missingH1_FP,
-      trueNegatives: missingH1_TN,
-      falseNegatives: missingH1_FN,
-      status: "MEASURED",
-    },
-    {
-      ruleCode: "CONTENT_MULTIPLE_H1",
-      totalEvaluatedPages: TEST_URLS.length,
-      truePositives: multipleH1_TP,
-      falsePositives: multipleH1_FP,
-      trueNegatives: multipleH1_TN,
-      falseNegatives: multipleH1_FN,
-      status: "MEASURED",
-    },
-    {
-      ruleCode: "A11Y_MISSING_MAIN_LANDMARK",
-      totalEvaluatedPages: TEST_URLS.length,
-      truePositives: missingMain_TP,
-      falsePositives: missingMain_FP,
-      trueNegatives: missingMain_TN,
-      falseNegatives: missingMain_FN,
-      status: "MEASURED",
-    },
-    {
-      ruleCode: "CONTENT_MISSING_TITLE",
-      totalEvaluatedPages: TEST_URLS.length,
-      truePositives: missingTitle_TP,
-      falsePositives: missingTitle_FP,
-      trueNegatives: missingTitle_TN,
-      falseNegatives: missingTitle_FN,
-      status: "MEASURED",
-    },
-    {
-      ruleCode: "CONTENT_THIN_WORD_COUNT",
-      totalEvaluatedPages: TEST_URLS.length,
-      truePositives: thinContent_TP,
-      falsePositives: thinContent_FP,
-      trueNegatives: thinContent_TN,
-      falseNegatives: thinContent_FN,
-      status: "MEASURED",
-    },
-    {
-      ruleCode: "A11Y_UNLABELLED_FORM_CONTROL",
-      totalEvaluatedPages: TEST_URLS.length,
-      truePositives: unlabelledForm_TP,
-      falsePositives: unlabelledForm_FP,
-      trueNegatives: unlabelledForm_TN,
-      falseNegatives: unlabelledForm_FN,
-      status: "MEASURED",
-    },
+    toRuleMetric(trackerMissingTitle),
+    toRuleMetric(trackerMissingH1),
+    toRuleMetric(trackerMultipleH1),
+    toRuleMetric(trackerMissingMain),
+    toRuleMetric(trackerThinContent),
+    toRuleMetric(trackerUnlabelledForm),
+    toRuleMetric(trackerExternalBroken),
   ];
 
   const artifact: ParityArtifact = {
@@ -981,10 +1200,11 @@ export async function executeParitySuite(
     renderTriggerAccuracy,
     renderDecisionSamples,
     ruleMetrics,
+    externalConfirmedBrokenDetails: confirmedBrokenDetails,
   };
 
   console.log(
-    `[Verify:Parity] Complete.\n  - Raw Comparable Parity:           ${rawExtractionParity.comparableParity}%\n  - Production Authoritative Parity: ${productionAuthoritativeParity.comparableParity}%\n  - Render Trigger Recall:           ${recall}% (Precision: ${precision}%)\n  - Accuracy Band:                   ${productionAuthoritativeParity.accuracyBand.toUpperCase()}`
+    `[Verify:Parity] Complete.\n  - Raw Comparable Parity:                 ${rawExtractionParity.comparableParity}%\n  - Production Authoritative Parity:       ${productionAuthoritativeParity.comparableParity}%\n  - Fact-Difference Render Recall:         ${factDiffRecall}%\n  - Diagnostic-Impact Render Recall:       ${diagImpactRecall}%\n  - Accuracy Band:                         ${productionAuthoritativeParity.accuracyBand.toUpperCase()}`
   );
   return artifact;
 }

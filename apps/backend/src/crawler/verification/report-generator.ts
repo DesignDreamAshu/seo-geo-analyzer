@@ -53,7 +53,19 @@ export function generateReleaseReport(
     );
   }
 
-  // 2. Parity Arithmetic Validation on Authoritative Parity
+  // 2. Raw Git Provenance Reconciliation
+  const rawGitEvidenceReconciled =
+    header.gitEvidence &&
+    header.gitEvidence.parsedLocalSha === header.gitShaFull &&
+    (!header.remoteVerified || header.gitEvidence.exact40CharacterMatch);
+
+  if (!rawGitEvidenceReconciled) {
+    throw new Error(
+      `RAW GIT EVIDENCE RECONCILIATION FAILED: Parsed local SHA (${header.gitEvidence?.parsedLocalSha}) !== Report SHA (${header.gitShaFull})`
+    );
+  }
+
+  // 3. Parity Arithmetic Validation on Authoritative Parity
   const auth = parity.productionAuthoritativeParity;
   const paritySum =
     auth.exactMatches +
@@ -66,7 +78,7 @@ export function generateReleaseReport(
     throw new Error(`PARITY ARITHMETIC FAILED: sum(${paritySum}) !== total(${auth.totalFactsConsidered})`);
   }
 
-  // 3. Field Metrics Sum vs Global Parity Invariant
+  // 4. Field Metrics Sum vs Global Parity Invariant
   let sumFieldExact = 0;
   let sumFieldTol = 0;
   let sumFieldMis = 0;
@@ -91,14 +103,14 @@ export function generateReleaseReport(
     );
   }
 
-  // 4. Mismatch Category Sum Check
+  // 5. Mismatch Category Sum Check
   const mismatchSum = Object.values(auth.mismatchCategories).reduce((a, b) => a + b, 0);
   const mismatchCategoriesSumValid = mismatchSum === auth.mismatches;
   if (!mismatchCategoriesSumValid) {
     throw new Error(`MISMATCH SUM FAILED: sum(${mismatchSum}) !== totalMismatch(${auth.mismatches})`);
   }
 
-  // 5. External Telemetry Check
+  // 6. External Telemetry Check
   const ext = audit.externalLinkTelemetry;
   const telemetryArithmeticValid =
     ext.checkedUniqueUrls + ext.uncheckedUniqueUrls === ext.discoveredUniqueUrls &&
@@ -109,11 +121,11 @@ export function generateReleaseReport(
       ext.inconclusiveUniqueUrls ===
       ext.checkedUniqueUrls;
 
-  // 6. Render Decision Telemetry Invariant Check
+  // 7. Render Decision Telemetry Invariant Check
   const rTel = audit.renderingTelemetry;
   const renderDecisionTelemetryValid = rTel.eligibleForRender === rTel.actuallyRendered + rTel.skippedEligible;
 
-  // 7. Score Deductions Check
+  // 8. Score Deductions Check
   const totalPenalties = audit.issues.reduce((sum, i) => sum + (i.scorePenalty || 0), 0);
   const scoreDeductionsValid = Math.abs(audit.healthScore - (100 - totalPenalties)) < 0.1;
 
@@ -159,38 +171,56 @@ export function generateReleaseReport(
   const manifestPath = path.join(artifactsDir, "manifest.json");
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
 
-  // Multi-Dimensional Release Status Calculation (Section 5 & 23)
+  // Multi-Dimensional Release Status Calculation
   const buildVerificationStatus: MultiDimensionalReleaseStatus["buildVerificationStatus"] = "PASS";
 
-  const coreSeoPassed = auth.categoryParity.coreSeo.qualityGatePassed;
-  const structuralPassed = auth.categoryParity.structuralAccessibility.qualityGatePassed;
-  const contentPassed = auth.categoryParity.contentText.qualityGatePassed;
+  const environmentVerificationStatus: MultiDimensionalReleaseStatus["environmentVerificationStatus"] =
+    header.environment.nodeVersionMatchesExpected ? "MATCH" : "MISMATCH";
+
+  const provenanceVerificationStatus: MultiDimensionalReleaseStatus["provenanceVerificationStatus"] =
+    header.verificationGitState === "REMOTE_REPOSITORY_MISMATCH"
+      ? "REMOTE_REPOSITORY_MISMATCH"
+      : header.remoteVerified
+      ? "REMOTE_VERIFIED"
+      : header.workingTreeClean
+      ? "LOCAL_ONLY"
+      : "PROVENANCE_NOT_VERIFIED";
+
+  const hasFailingField = auth.fieldMetrics.some((f) => f.fieldQualityStatus === "FAIL");
+  const hasPartialField = auth.fieldMetrics.some((f) => f.fieldQualityStatus === "PARTIAL");
+
+  const factParityStatus: MultiDimensionalReleaseStatus["factParityStatus"] = hasFailingField
+    ? "FACT_PARITY_FAIL"
+    : hasPartialField
+    ? "FACT_PARITY_WITH_WARNINGS"
+    : "FACT_PARITY_PASS";
+
+  // Check all required diagnostic rules for FP/FN
+  const hasDiagnosticFpOrFn = parity.ruleMetrics.some((r) => r.falsePositives > 0 || r.falseNegatives > 0);
+
+  const diagnosticAccuracyStatus: MultiDimensionalReleaseStatus["diagnosticAccuracyStatus"] =
+    hasDiagnosticFpOrFn ? "NEEDS_REVIEW" : "DIAGNOSTIC_ACCURACY_PASS";
+
   const browserAvailable = capability.capability === "available";
 
-  const criticalRuleErrors = parity.ruleMetrics
-    .filter((r) => r.ruleCode === "CONTENT_MISSING_H1" || r.ruleCode === "CONTENT_MISSING_TITLE")
-    .some((r) => r.falsePositives > 0 || r.falseNegatives > 0);
-
-  const accuracyVerificationStatus: MultiDimensionalReleaseStatus["accuracyVerificationStatus"] =
-    coreSeoPassed && structuralPassed && contentPassed && !criticalRuleErrors
-      ? "PASS"
-      : coreSeoPassed && !criticalRuleErrors
-      ? "NEEDS_REVIEW"
-      : "FAIL";
-
-  const localReleaseStatus: MultiDimensionalReleaseStatus["localReleaseStatus"] =
-    buildVerificationStatus === "PASS" && browserAvailable && coreSeoPassed
-      ? accuracyVerificationStatus === "PASS"
-        ? "VERIFIED_PASS"
-        : "VERIFIED_WITH_WARNINGS"
-      : "FAILED";
+  let localReleaseStatus: MultiDimensionalReleaseStatus["localReleaseStatus"] = "FAILED";
+  if (buildVerificationStatus === "PASS" && browserAvailable && diagnosticAccuracyStatus === "DIAGNOSTIC_ACCURACY_PASS") {
+    if (environmentVerificationStatus === "MATCH" && factParityStatus === "FACT_PARITY_PASS" && provenanceVerificationStatus === "REMOTE_VERIFIED") {
+      localReleaseStatus = "VERIFIED_PASS";
+    } else {
+      localReleaseStatus = "VERIFIED_WITH_WARNINGS";
+    }
+  }
 
   const productionDeploymentStatus: MultiDimensionalReleaseStatus["productionDeploymentStatus"] =
     deploymentVerification?.deploymentStatus || "DEPLOYMENT_URL_NOT_CONFIGURED";
 
   const statuses: MultiDimensionalReleaseStatus = {
     buildVerificationStatus,
-    accuracyVerificationStatus,
+    environmentVerificationStatus,
+    provenanceVerificationStatus,
+    factParityStatus,
+    diagnosticAccuracyStatus,
     localReleaseStatus,
     productionDeploymentStatus,
   };
@@ -215,6 +245,10 @@ export function generateReleaseReport(
     overallStatus: localReleaseStatus,
     summary: {
       buildStatus: "PASS",
+      environmentStatus: environmentVerificationStatus,
+      provenanceStatus: provenanceVerificationStatus,
+      factParityStatus,
+      diagnosticAccuracyStatus,
       browserCapability: capability.capability,
       rawParityComparableRate: parity.rawExtractionParity.comparableParity,
       productionParityComparableRate: auth.comparableParity,
@@ -227,7 +261,8 @@ export function generateReleaseReport(
       pagesCrawled: audit.inventory.totalCrawled,
       indexablePages: audit.inventory.totalIndexable,
       renderedPagesCount: audit.renderingTelemetry.authoritativeRenderedPagesCount,
-      renderTriggerRecallPercent: parity.renderTriggerAccuracy.recallPercent,
+      renderTriggerRecallPercent: parity.renderTriggerAccuracy.factDifferenceTriggerRecall,
+      diagnosticImpactTriggerRecallPercent: parity.renderTriggerAccuracy.diagnosticImpactTriggerRecall,
       terminationReason: audit.terminationReason,
       totalIssues: audit.issues.length,
       criticalIssues: audit.severityCounts.critical,
@@ -236,6 +271,7 @@ export function generateReleaseReport(
       passed:
         sameRunId &&
         sameGitSha &&
+        rawGitEvidenceReconciled &&
         parityArithmeticValid &&
         fieldMetricsSumReconcilesGlobally &&
         mismatchCategoriesSumValid &&
@@ -249,6 +285,7 @@ export function generateReleaseReport(
       telemetryArithmeticValid,
       scoreDeductionsValid,
       renderDecisionTelemetryValid,
+      rawGitEvidenceReconciled,
     },
     provenance: {
       gitShaFull: header.gitShaFull,
@@ -260,6 +297,7 @@ export function generateReleaseReport(
       commitTimestamp: (header as any).commitTimestamp,
       commitAuthor: (header as any).commitAuthor,
       commitMessage: (header as any).commitMessage,
+      gitEvidence: header.gitEvidence,
     },
     environment: header.environment,
     browserCapability: capability,
@@ -278,7 +316,7 @@ export function generateReleaseReport(
 
 ---
 
-## 1. Release Provenance & Run Identity
+## 1. Release Provenance & Raw Git Command Evidence
 
 \`\`\`text
 Verification Run ID:    ${reportJson.verificationRunId}
@@ -288,13 +326,33 @@ Remote Match:           ${reportJson.remoteVerified ? "YES (100% Full 40-char ma
 Git Verification State: ${reportJson.verificationGitState}
 Git Branch:             ${reportJson.branch}
 Working Tree Clean:     ${reportJson.workingTreeClean ? "YES (Clean)" : "NO (Dirty)"}
+Repository Origin:      ${header.gitEvidence?.originUrl || "unknown"}
+Expected Repo Match:    ${header.gitEvidence?.isExpectedRepository ? "YES (DesignDreamAshu/seo-geo-analyzer)" : "NO / MISMATCH"}
 Execution Started:      ${header.startedAt}
 Execution Completed:    ${reportJson.generatedAt}
 Target Production:      ${header.targetSite}
-Node Version:           ${header.environment.nodeVersion} (Target: ${header.environment.expectedProductionNodeVersion})
+Node Version:           ${header.environment.nodeVersion} (Target Production: ${header.environment.expectedProductionNodeVersion})
 Platform / Arch:        ${header.environment.platform} (${header.environment.arch})
 Playwright Version:     ${header.environment.runtimePlaywrightVersion || header.environment.playwrightVersion}
 Chromium Version:       ${capability.chromiumVersion}
+\`\`\`
+
+### Literal Raw Command Outputs:
+\`\`\`bash
+$ git remote get-url origin
+${header.gitEvidence?.originUrl || "N/A"}
+
+$ git rev-parse HEAD
+${header.gitEvidence?.revParseHeadRaw || "N/A"}
+
+$ git branch --show-current
+${header.gitEvidence?.branchRaw || "N/A"}
+
+$ git status --porcelain
+${header.gitEvidence?.statusRaw || "(clean)"}
+
+$ git ls-remote origin refs/heads/${reportJson.branch}
+${header.gitEvidence?.lsRemoteRaw || "N/A"}
 \`\`\`
 
 ---
@@ -304,9 +362,12 @@ Chromium Version:       ${capability.chromiumVersion}
 | Dimension | Status | Description |
 | :--- | :---: | :--- |
 | **BuildVerificationStatus** | **${statuses.buildVerificationStatus}** | TypeScript compiler build and unit regression suites passed |
-| **AccuracyVerificationStatus** | **${statuses.accuracyVerificationStatus}** | Production authoritative parity and independent rule confusion matrices |
-| **LocalReleaseStatus** | **${statuses.localReleaseStatus}** | Local software qualification (Core SEO >= 98%, Invariants valid) |
-| **ProductionDeploymentStatus** | **${statuses.productionDeploymentStatus}** | Live deployed Render service verification |
+| **EnvironmentVerificationStatus** | **${statuses.environmentVerificationStatus}** | Runtime Node version match against production Node ${header.environment.expectedProductionNodeVersion} |
+| **ProvenanceVerificationStatus** | **${statuses.provenanceVerificationStatus}** | Remote Git origin identity and full 40-character SHA synchronization |
+| **FactParityStatus** | **${statuses.factParityStatus}** | Factual parity across all individual DOM fields (handling PARTIAL fields) |
+| **DiagnosticAccuracyStatus** | **${statuses.diagnosticAccuracyStatus}** | Production diagnostic rule emission accuracy (0 False Positives / 0 False Negatives) |
+| **LocalReleaseStatus** | **${statuses.localReleaseStatus}** | Local software release qualification |
+| **ProductionDeploymentStatus** | **${statuses.productionDeploymentStatus}** | Live deployed Render service status |
 
 ---
 
@@ -315,6 +376,7 @@ Chromium Version:       ${capability.chromiumVersion}
 | Invariant Check | Status | Verification Detail |
 | :--- | :---: | :--- |
 | **Identity Invariant** | **PASS** | All artifacts share \`verificationRunId\` and full \`gitShaFull\` exactly |
+| **Raw Git Provenance** | **PASS** | Literal stdout SHA reconciles with report SHA and remote origin |
 | **Parity Arithmetic** | **PASS** | \`${auth.exactMatches} + ${auth.toleratedMatches} + ${auth.mismatches} === ${auth.totalFactsConsidered}\` |
 | **Field Reconcile Invariant** | **PASS** | Per-field metric sums reconcile 100% to global parity totals |
 | **Mismatch Cause Sum** | **PASS** | Sum of mismatch categories (\`${mismatchSum}\`) === total mismatches (\`${auth.mismatches}\`) |
@@ -367,30 +429,45 @@ ${Object.entries(auth.mismatchCategories)
 
 ---
 
-## 5. Rule-Level Ground Truth Accuracy (Measured Confusion Matrix)
+## 5. True Diagnostic Rule Accuracy (Measured Production Issue Emission vs Oracle Truth)
 
-| Diagnostic Rule Code | Evaluated Pages | True Positives (TP) | True Negatives (TN) | False Positives (FP) | False Negatives (FN) | Status |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| Diagnostic Rule Code | Evaluated Pages | Eligible Crawler | Eligible Oracle | Comparable | True Positives (TP) | True Negatives (TN) | False Positives (FP) | False Negatives (FN) | Status |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 ${parity.ruleMetrics
   .map(
     (r) =>
-      `| \`${r.ruleCode}\` | ${r.totalEvaluatedPages} | ${r.truePositives} | ${r.trueNegatives} | **${r.falsePositives}** | **${r.falseNegatives}** | **${r.status}** |`
+      `| \`${r.ruleCode}\` | ${r.totalEvaluatedPages} | ${r.eligibleCrawlerPages} | ${r.eligibleBrowserPages} | ${r.comparablePages} | ${r.truePositives} | ${r.trueNegatives} | **${r.falsePositives}** | **${r.falseNegatives}** | **${r.status}** |`
   )
   .join("\n")}
-| \`LINKS_BROKEN_EXTERNAL\` | N/A | - | - | - | - | **NOT MEASURED (Outcome Verified)** |
+
+### False Positive / Negative URLs:
+${parity.ruleMetrics
+  .filter((r) => r.falsePositives > 0 || r.falseNegatives > 0)
+  .map((r) => `* **${r.ruleCode}**: FP: [${r.falsePositiveUrls.join(", ") || "none"}], FN: [${r.falseNegativeUrls.join(", ") || "none"}]`)
+  .join("\n") || "* None (0 False Positives, 0 False Negatives across all measured rules)"}
 
 ---
 
-## 6. Render Trigger Accuracy (Precision & Recall)
+## 6. Render Trigger Precision & Recall Analysis
 
 \`\`\`text
-Target URLs Evaluated:     ${parity.renderTriggerAccuracy.targetUrlsCount}
-True Positives (TP):       ${parity.renderTriggerAccuracy.truePositives}
-True Negatives (TN):       ${parity.renderTriggerAccuracy.trueNegatives}
-False Positives (FP):      ${parity.renderTriggerAccuracy.falsePositives}
-False Negatives (FN):      ${parity.renderTriggerAccuracy.falseNegatives}
-Render Trigger Precision:  ${parity.renderTriggerAccuracy.precisionPercent}%
-Render Trigger Recall:     ${parity.renderTriggerAccuracy.recallPercent}%
+Target URLs Evaluated:                     ${parity.renderTriggerAccuracy.targetUrlsCount}
+
+Fact-Difference Trigger Metrics (DOM Variance):
+  - True Positives (TP):                   ${parity.renderTriggerAccuracy.factDiff_TP}
+  - True Negatives (TN):                   ${parity.renderTriggerAccuracy.factDiff_TN}
+  - False Positives (FP):                  ${parity.renderTriggerAccuracy.factDiff_FP}
+  - False Negatives (FN):                  ${parity.renderTriggerAccuracy.factDiff_FN}
+  - Fact-Difference Precision:             ${parity.renderTriggerAccuracy.factDifferencePrecision}%
+  - Fact-Difference Recall:                ${parity.renderTriggerAccuracy.factDifferenceTriggerRecall}%
+
+Diagnostic-Impact Trigger Metrics (Release Gating):
+  - True Positives (TP):                   ${parity.renderTriggerAccuracy.diagImpact_TP}
+  - True Negatives (TN):                   ${parity.renderTriggerAccuracy.diagImpact_TN}
+  - False Positives (FP):                  ${parity.renderTriggerAccuracy.diagImpact_FP}
+  - False Negatives (FN):                  ${parity.renderTriggerAccuracy.diagImpact_FN}
+  - Diagnostic-Impact Precision:           ${parity.renderTriggerAccuracy.diagnosticImpactPrecision}%
+  - Diagnostic-Impact Recall:              ${parity.renderTriggerAccuracy.diagnosticImpactTriggerRecall}%
 \`\`\`
 
 ---
@@ -442,7 +519,7 @@ Issue Severity Counts:
 
 ---
 
-## 9. Reconciled External Link Verification Telemetry
+## 9. Reconciled External Link Verification Telemetry & Evidence Details
 
 \`\`\`text
 Discovered Unique URLs:          ${ext.discoveredUniqueUrls}
@@ -463,6 +540,18 @@ Reconciled Outcomes:
   - Excluded Hash ('#'):         ${ext.excludedPlaceholderHashCount} instances
   - Excluded Mailto/Tel/JS:      ${ext.excludedMailtoTelJsCount} instances
 \`\`\`
+
+### Confirmed Broken External Link Evidence:
+${audit.confirmedBrokenExternalDetails && audit.confirmedBrokenExternalDetails.length > 0
+  ? `| Source Page | Anchor | Target URL | HTTP | Nav Status | Browser State | Title | Final Outcome | Reason |
+| :--- | :--- | :--- | :---: | :---: | :---: | :--- | :--- | :--- |
+${audit.confirmedBrokenExternalDetails
+  .map(
+    (b) =>
+      `| \`${b.sourcePageUrl.replace("https://www.botconsulting.io", "") || "/"}\` | "${b.anchorText}" | \`${b.targetUrl}\` | ${b.httpStatus} | ${b.browserNavigationStatus || "N/A"} | \`${b.browserPageState || "N/A"}\` | "${b.browserTitle || ""}" | **${b.finalOutcome}** | ${b.reason} |`
+  )
+  .join("\n")}`
+  : "* None (0 Confirmed Broken External Links)"}
 
 ---
 
@@ -487,7 +576,7 @@ Deployment Status:             ${statuses.productionDeploymentStatus}
 Deployed Git SHA:              ${deploymentVerification?.deployedGitSha || "N/A"}
 SHA Match:                     ${deploymentVerification?.shaMatch ? "YES" : "NO"}
 Error Code:                    ${deploymentVerification?.errorCode || "None"}
-Error Message:                 ${deploymentVerification?.errorMessage || "None"}
+Error Message:                 ${deploymentVerification?.errorMessage || "No DEPLOYED_BACKEND_URL or --url=<url> argument was configured."}
 \`\`\`
 
 ---

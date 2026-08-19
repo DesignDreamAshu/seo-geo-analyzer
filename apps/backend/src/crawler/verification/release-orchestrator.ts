@@ -114,6 +114,7 @@ async function main() {
     targetSite: "https://www.botconsulting.io/",
     startedAt,
     environment,
+    gitEvidence: git.gitEvidence,
   };
 
   console.log(`[Run ID] ${verificationRunId}`);
