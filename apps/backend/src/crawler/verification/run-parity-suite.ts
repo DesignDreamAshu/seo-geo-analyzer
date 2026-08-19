@@ -84,25 +84,21 @@ const EXTERNAL_LINK_PARITY_TARGETS = [
     url: "https://store.servicenow.com/store/app/9333749c1b56a2100ffacaa6624bcb77",
     sourcePage: "https://www.botconsulting.io/post/ar-bot-ai-powered-accounts-receivable-automation-on-servicenow",
     anchorText: "ServiceNow Store",
-    expectedOracleStatus: "broken_destination",
   },
   {
     url: "https://www.linkedin.com/company/botconsulting",
     sourcePage: "https://www.botconsulting.io/",
     anchorText: "LinkedIn",
-    expectedOracleStatus: "valid_or_blocked",
   },
   {
     url: "https://www.google.com",
     sourcePage: "https://www.botconsulting.io/",
     anchorText: "Google",
-    expectedOracleStatus: "valid_destination",
   },
   {
     url: "https://www.google.com/non-existent-page-404-test-xyz",
     sourcePage: "https://www.botconsulting.io/test",
     anchorText: "Broken Link",
-    expectedOracleStatus: "broken_destination",
   },
 ];
 
@@ -910,10 +906,136 @@ export async function executeParitySuite(
     };
   }
 
+async function evaluateIndependentExternalOracle(url: string, browser: any): Promise<{
+  oracleOutcome: "verified_valid" | "verified_broken" | "inconclusive" | "soft_404";
+  navStatus: number | null;
+  finalUrl: string;
+  pageTitle: string;
+  headings: string[];
+  wordCount: number;
+  snippet: string;
+  challengeDetected: boolean;
+}> {
+  const context = await browser.newContext({
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    viewport: { width: 1280, height: 800 },
+  });
+  const page = await context.newPage();
+  try {
+    let navStatus: number | null = null;
+    try {
+      const resp = await page.goto(url, {
+        timeout: 15000,
+        waitUntil: "domcontentloaded",
+      });
+      navStatus = resp ? resp.status() : null;
+      await page.waitForTimeout(1000);
+    } catch {
+      // navigation timeout or network failure
+    }
+
+    const pageTitle = (await page.title().catch(() => "")) || "";
+    const finalUrl = page.url() || url;
+    const bodyText = (await page.evaluate(() => (document.body ? document.body.innerText : "")).catch(() => "")) || "";
+    const words = bodyText.split(/\s+/).filter(Boolean);
+    const wordCount = words.length;
+    const snippet = bodyText.slice(0, 300);
+
+    const headings = await page
+      .evaluate(() => {
+        return Array.from(document.querySelectorAll("h1, h2, h3"))
+          .map((h) => (h.textContent || "").trim())
+          .filter(Boolean);
+      })
+      .catch(() => []);
+
+    const titleLower = pageTitle.toLowerCase().trim();
+    const combined = `${titleLower} ${headings.join(" ").toLowerCase()} ${bodyText.toLowerCase()}`;
+
+    // 1. Independent Challenge Detection
+    const challengeDetected =
+      (combined.includes("cloudflare") &&
+        (combined.includes("verify you are human") ||
+          combined.includes("turnstile") ||
+          combined.includes("attention required"))) ||
+      combined.includes("security check") ||
+      combined.includes("bot detection") ||
+      navStatus === 999;
+
+    if (challengeDetected || navStatus === null || (navStatus === 403 && wordCount < 50)) {
+      return {
+        oracleOutcome: "inconclusive",
+        navStatus,
+        finalUrl,
+        pageTitle,
+        headings,
+        wordCount,
+        snippet,
+        challengeDetected,
+      };
+    }
+
+    // 2. Independent Explicit 404 / Gone Detection
+    const isExplicitNotFound =
+      titleLower.includes("404 not found") ||
+      titleLower === "page not found" ||
+      titleLower === "not found" ||
+      titleLower.includes("404 - ") ||
+      headings.some((h) => {
+        const hl = h.toLowerCase().trim();
+        return hl === "page not found" || hl === "404 not found" || hl === "error 404" || hl === "404 error";
+      }) ||
+      ((combined.includes("page not found") || combined.includes("404")) && wordCount < 30);
+
+    if (isExplicitNotFound) {
+      return {
+        oracleOutcome: navStatus === 200 ? "soft_404" : "verified_broken",
+        navStatus,
+        finalUrl,
+        pageTitle,
+        headings,
+        wordCount,
+        snippet,
+        challengeDetected,
+      };
+    }
+
+    // 3. Independent Valid Destination Detection (e.g. Substantial Product / Store Page or Standard Content)
+    const hasMeaningfulContent = wordCount >= 30 || (wordCount >= 10 && pageTitle.length > 5);
+    if (hasMeaningfulContent && !isExplicitNotFound) {
+      return {
+        oracleOutcome: "verified_valid",
+        navStatus,
+        finalUrl,
+        pageTitle,
+        headings,
+        wordCount,
+        snippet,
+        challengeDetected,
+      };
+    }
+
+    return {
+      oracleOutcome: navStatus && navStatus >= 400 ? "verified_broken" : "inconclusive",
+      navStatus,
+      finalUrl,
+      pageTitle,
+      headings,
+      wordCount,
+      snippet,
+      challengeDetected,
+    };
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
   const trackerMissingH1 = createTracker("CONTENT_MISSING_H1");
   const trackerMultipleH1 = createTracker("CONTENT_MULTIPLE_H1");
   const trackerMissingMain = createTracker("A11Y_MISSING_MAIN_LANDMARK");
   const trackerMissingTitle = createTracker("CONTENT_MISSING_TITLE");
+  const trackerMissingMeta = createTracker("CONTENT_MISSING_META_DESC");
   const trackerThinContent = createTracker("CONTENT_THIN_WORD_COUNT");
   const trackerUnlabelledForm = createTracker("A11Y_UNLABELLED_FORM_CONTROL");
 
@@ -956,8 +1078,14 @@ export async function executeParitySuite(
     const isIndexable = authResult.pageData.isIndexable;
     const isHtml = authResult.pageData.resourceType === "html_page";
 
-    // 2. Independent Browser Oracle Expected Diagnostic Issue Ground Truth
-    const oracleShouldEmitMissingTitle = isHtml && isIndexable && isStandardContent && (!browserFacts.title || browserFacts.title.trim().length === 0);
+    // 2. Independent Browser Oracle Expected Diagnostic Issue Ground Truth (Uses ONLY browser facts)
+    const oracleShouldEmitMissingTitle =
+      isHtml && isIndexable && isStandardContent && (!browserFacts.title || browserFacts.title.trim().length === 0);
+    const oracleShouldEmitMissingMeta =
+      isHtml &&
+      isIndexable &&
+      isStandardContent &&
+      (!browserFacts.metaDescription || browserFacts.metaDescription.trim().length === 0);
     const oracleShouldEmitMissingH1 = isHtml && isIndexable && isStandardContent && browserFacts.h1Count === 0;
     const oracleShouldEmitMultipleH1 = isHtml && isIndexable && isStandardContent && browserFacts.h1Count > 1;
     const oracleShouldEmitMissingMain = isHtml && (pClass as string) !== "utility_endpoint" && !browserFacts.hasMain;
@@ -966,9 +1094,9 @@ export async function executeParitySuite(
       isIndexable &&
       isStandardContent &&
       (browserFacts.mainContentWordCount || 0) < 180;
-    const oracleShouldEmitUnlabelled =
-      isHtml &&
-      (authResult.pageData.forms.some((f) => f.unlabelledCount > 0));
+    const browserFormRuleEligible =
+      isHtml && (browserFacts.formCount > 0 || browserFacts.unlabelledFormControlCount > 0);
+    const oracleShouldEmitUnlabelled = browserFormRuleEligible && browserFacts.unlabelledFormControlCount > 0;
 
     function recordRuleOutcome(
       tracker: RuleTracker,
@@ -1007,6 +1135,14 @@ export async function executeParitySuite(
     );
 
     recordRuleOutcome(
+      trackerMissingMeta,
+      isHtml && isIndexable && isStandardContent,
+      isHtml && isIndexable && isStandardContent,
+      emittedRuleCodes.has("CONTENT_MISSING_META_DESC"),
+      oracleShouldEmitMissingMeta
+    );
+
+    recordRuleOutcome(
       trackerMissingH1,
       isHtml && isIndexable && isStandardContent,
       isHtml && isIndexable && isStandardContent,
@@ -1038,11 +1174,11 @@ export async function executeParitySuite(
       oracleShouldEmitThin
     );
 
-    const isFormEligible = isHtml && (authResult.pageData.classification.primaryClass === "form_application" || authResult.renderDecisionSample.attempted || authResult.pageData.forms.length > 0);
+    const isCrawlerFormEligible = isHtml && (authResult.pageData.classification.primaryClass === "form_application" || authResult.renderDecisionSample.attempted || authResult.pageData.forms.length > 0);
     recordRuleOutcome(
       trackerUnlabelledForm,
-      isFormEligible,
-      isFormEligible,
+      isCrawlerFormEligible,
+      browserFormRuleEligible,
       emittedRuleCodes.has("A11Y_UNLABELLED_FORM_CONTROL"),
       oracleShouldEmitUnlabelled
     );
@@ -1060,7 +1196,9 @@ export async function executeParitySuite(
       rawEmittedRuleCodes.has("CONTENT_MULTIPLE_H1") !== oracleShouldEmitMultipleH1 ||
       rawEmittedRuleCodes.has("CONTENT_THIN_WORD_COUNT") !== oracleShouldEmitThin ||
       rawEmittedRuleCodes.has("CONTENT_MISSING_TITLE") !== oracleShouldEmitMissingTitle ||
-      rawEmittedRuleCodes.has("A11Y_MISSING_MAIN_LANDMARK") !== oracleShouldEmitMissingMain;
+      rawEmittedRuleCodes.has("CONTENT_MISSING_META_DESC") !== oracleShouldEmitMissingMeta ||
+      rawEmittedRuleCodes.has("A11Y_MISSING_MAIN_LANDMARK") !== oracleShouldEmitMissingMain ||
+      rawEmittedRuleCodes.has("A11Y_UNLABELLED_FORM_CONTROL") !== oracleShouldEmitUnlabelled;
 
     const triggerAttempted = authResult.renderDecisionSample.attempted;
 
@@ -1081,24 +1219,31 @@ export async function executeParitySuite(
   const confirmedBrokenDetails: ExternalLinkConfirmedBrokenEvidence[] = [];
 
   for (const target of EXTERNAL_LINK_PARITY_TARGETS) {
-    const evidence = await verifyLinkTarget(target.url, target.sourcePage, target.anchorText, 10000);
-    const isCrawlerBroken = evidence.outcome === "confirmed_broken";
-    const isOracleBroken = target.expectedOracleStatus === "broken_destination";
+    const oracleResult = await evaluateIndependentExternalOracle(target.url, browser);
+    const crawlerEvidence = await verifyLinkTarget(target.url, target.sourcePage, target.anchorText, 10000);
+
+    const isCrawlerBroken = crawlerEvidence.outcome === "confirmed_broken";
+    const isOracleBroken = oracleResult.oracleOutcome === "verified_broken" || oracleResult.oracleOutcome === "soft_404";
+    const isOracleInconclusive = oracleResult.oracleOutcome === "inconclusive" || oracleResult.challengeDetected;
 
     trackerExternalBroken.eligibleCrawler++;
-    trackerExternalBroken.eligibleBrowser++;
-    trackerExternalBroken.comparable++;
+    if (!isOracleInconclusive) {
+      trackerExternalBroken.eligibleBrowser++;
+      trackerExternalBroken.comparable++;
 
-    if (isCrawlerBroken && isOracleBroken) {
-      trackerExternalBroken.tp++;
-    } else if (!isCrawlerBroken && !isOracleBroken) {
-      trackerExternalBroken.tn++;
-    } else if (isCrawlerBroken && !isOracleBroken) {
-      trackerExternalBroken.fp++;
-      trackerExternalBroken.fpUrls.push(target.url);
-    } else if (!isCrawlerBroken && isOracleBroken) {
-      trackerExternalBroken.fn++;
-      trackerExternalBroken.fnUrls.push(target.url);
+      if (isCrawlerBroken && isOracleBroken) {
+        trackerExternalBroken.tp++;
+      } else if (!isCrawlerBroken && !isOracleBroken) {
+        trackerExternalBroken.tn++;
+      } else if (isCrawlerBroken && !isOracleBroken) {
+        trackerExternalBroken.fp++;
+        trackerExternalBroken.fpUrls.push(target.url);
+      } else if (!isCrawlerBroken && isOracleBroken) {
+        trackerExternalBroken.fn++;
+        trackerExternalBroken.fnUrls.push(target.url);
+      }
+    } else {
+      trackerExternalBroken.inconclusive++;
     }
 
     if (isCrawlerBroken) {
@@ -1106,12 +1251,12 @@ export async function executeParitySuite(
         sourcePageUrl: target.sourcePage,
         anchorText: target.anchorText,
         targetUrl: target.url,
-        httpStatus: evidence.httpStatus,
-        browserNavigationStatus: evidence.browserVerification?.navigationStatus,
-        browserPageState: evidence.browserVerification?.pageState,
-        browserTitle: evidence.browserVerification?.pageTitle,
-        finalOutcome: evidence.outcome,
-        reason: evidence.reason,
+        httpStatus: crawlerEvidence.httpStatus,
+        browserNavigationStatus: crawlerEvidence.browserVerification?.navigationStatus,
+        browserPageState: crawlerEvidence.browserVerification?.pageState,
+        browserTitle: crawlerEvidence.browserVerification?.pageTitle,
+        finalOutcome: crawlerEvidence.outcome,
+        reason: crawlerEvidence.reason,
         scorePenalty: 5,
       });
     }
@@ -1189,6 +1334,7 @@ export async function executeParitySuite(
 
   const ruleMetrics: RuleAccuracyMetric[] = [
     toRuleMetric(trackerMissingTitle),
+    toRuleMetric(trackerMissingMeta),
     toRuleMetric(trackerMissingH1),
     toRuleMetric(trackerMultipleH1),
     toRuleMetric(trackerMissingMain),

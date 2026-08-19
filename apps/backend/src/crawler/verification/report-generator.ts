@@ -19,6 +19,13 @@ function computeSha256(filePath: string): { sha256: string; byteSize: number } {
   return { sha256, byteSize: content.length };
 }
 
+export const FREEZE_POLICY = {
+  authoritativeGlobalParityMin: 98.0,
+  coreSeoParityMin: 98.0,
+  mainContentParityMin: 90.0,
+  diagnosticImpactRenderRecallMin: 100.0,
+};
+
 export function generateReleaseReport(
   header: VerificationRunHeader,
   capability: BrowserCapabilityArtifact,
@@ -215,27 +222,87 @@ export function generateReleaseReport(
   const productionDeploymentStatus: MultiDimensionalReleaseStatus["productionDeploymentStatus"] =
     deploymentVerification?.deploymentStatus || "DEPLOYMENT_URL_NOT_CONFIGURED";
 
-  const gates = {
-    build: buildVerificationStatus,
-    environment: environmentVerificationStatus === "MATCH" ? "PASS" : "MISMATCH",
-    provenance: provenanceVerificationStatus === "REMOTE_VERIFIED" ? "PASS" : provenanceVerificationStatus,
-    artifactIntegrity: "PASS",
-    productionAuthoritativeParity: auth.comparableParity >= 70 ? "PASS" : "FAIL",
-    diagnosticAccuracy: diagnosticAccuracyStatus === "DIAGNOSTIC_ACCURACY_PASS" ? "PASS" : "NEEDS_REVIEW",
-    externalLinkAccuracy: (parity.ruleMetrics.find(r => r.ruleCode === "LINKS_BROKEN_EXTERNAL")?.falsePositives || 0) === 0 ? "PASS" : "FAIL",
-    renderTriggerRecall: parity.renderTriggerAccuracy.diagnosticImpactTriggerRecall >= 80 ? "PASS" : "FAIL",
-    scoreInvariants: "PASS",
-    coverageIntegrity: "PASS",
+  const extRule = parity.ruleMetrics.find((r) => r.ruleCode === "LINKS_BROKEN_EXTERNAL");
+  const build = buildVerificationStatus;
+  const environment = environmentVerificationStatus === "MATCH" ? "PASS" : "MISMATCH";
+  const provenance = provenanceVerificationStatus === "REMOTE_VERIFIED" ? "PASS" : provenanceVerificationStatus;
+  const artifactIntegrity = sameRunId && sameGitSha ? "PASS" : "FAIL";
+  const productionAuthoritativeParity =
+    auth.comparableParity >= FREEZE_POLICY.authoritativeGlobalParityMin ? "PASS" : "FAIL";
+  const coreSeoParity =
+    auth.categoryParity.coreSeo.comparableParityPercent >= FREEZE_POLICY.coreSeoParityMin ? "PASS" : "FAIL";
+  const mainContentParity =
+    (auth.fieldMetrics.find((f) => f.field === "main_content_word_count")?.comparableParityPercent || 0) >=
+    FREEZE_POLICY.mainContentParityMin
+      ? "PASS"
+      : "FAIL";
+  const diagnosticAccuracy = hasDiagnosticFpOrFn ? "FAIL" : "PASS";
+  const externalLinkAccuracy =
+    extRule && extRule.falsePositives === 0 && extRule.falseNegatives === 0 ? "PASS" : "FAIL";
+  const renderTriggerRecall =
+    parity.renderTriggerAccuracy.diagnosticImpactTriggerRecall >= FREEZE_POLICY.diagnosticImpactRenderRecallMin
+      ? "PASS"
+      : "FAIL";
+  const scoreInvariants = scoreDeductionsValid && telemetryArithmeticValid && parityArithmeticValid ? "PASS" : "FAIL";
+  const coverageIntegrity = audit.auditCoveragePercent >= 80 ? "PASS" : "FAIL";
+
+  const gates: Record<string, string> = {
+    build,
+    environment,
+    provenance,
+    artifactIntegrity,
+    productionAuthoritativeParity,
+    coreSeoParity,
+    mainContentParity,
+    diagnosticAccuracy,
+    externalLinkAccuracy,
+    renderTriggerRecall,
+    scoreInvariants,
+    coverageIntegrity,
   };
 
   const knownAccuracyBlockers: string[] = [];
-  if (buildVerificationStatus !== "PASS") knownAccuracyBlockers.push("Build verification failed");
-  if (hasDiagnosticFpOrFn) knownAccuracyBlockers.push("One or more diagnostic rules has unresolved false positive/false negative");
-  if (provenanceVerificationStatus !== "REMOTE_VERIFIED") knownAccuracyBlockers.push("Git provenance not remote-verified");
+  if (build !== "PASS") knownAccuracyBlockers.push("Build verification failed");
+  if (environment !== "PASS")
+    knownAccuracyBlockers.push(
+      `Execution Node environment (${header.environment.nodeVersion}) does not match production target (Node ${header.environment.expectedProductionNodeVersion})`
+    );
+  if (provenance !== "PASS") knownAccuracyBlockers.push(`Git provenance verification failed: ${provenance}`);
+  if (artifactIntegrity !== "PASS") knownAccuracyBlockers.push("Artifact runId or git SHA cross-integrity check failed");
+  if (productionAuthoritativeParity !== "PASS")
+    knownAccuracyBlockers.push(
+      `Production authoritative global parity (${auth.comparableParity}%) below policy minimum (${FREEZE_POLICY.authoritativeGlobalParityMin}%)`
+    );
+  if (coreSeoParity !== "PASS")
+    knownAccuracyBlockers.push(
+      `Core SEO authoritative parity (${auth.categoryParity.coreSeo.comparableParityPercent}%) below policy minimum (${FREEZE_POLICY.coreSeoParityMin}%)`
+    );
+  if (mainContentParity !== "PASS")
+    knownAccuracyBlockers.push(
+      `Main content word count parity (${auth.fieldMetrics.find((f) => f.field === "main_content_word_count")?.comparableParityPercent || 0}%) below policy minimum (${FREEZE_POLICY.mainContentParityMin}%)`
+    );
+  if (diagnosticAccuracy !== "PASS")
+    knownAccuracyBlockers.push("One or more diagnostic rules has unresolved false positive/false negative");
+  if (externalLinkAccuracy !== "PASS") knownAccuracyBlockers.push("External broken-link accuracy check failed");
+  if (renderTriggerRecall !== "PASS")
+    knownAccuracyBlockers.push(
+      `Diagnostic impact render recall (${parity.renderTriggerAccuracy.diagnosticImpactTriggerRecall}%) below policy minimum (${FREEZE_POLICY.diagnosticImpactRenderRecallMin}%)`
+    );
+  if (scoreInvariants !== "PASS") knownAccuracyBlockers.push("One or more arithmetic score/telemetry invariants failed");
+  if (coverageIntegrity !== "PASS")
+    knownAccuracyBlockers.push(
+      `Audit coverage (${audit.auditCoveragePercent}%) below minimum required threshold (80%)`
+    );
+
+  const mandatoryGateValues = Object.values(gates);
+  const decision =
+    mandatoryGateValues.every((g) => g === "PASS") && knownAccuracyBlockers.length === 0
+      ? "READY_TO_FREEZE"
+      : "NOT_READY_TO_FREEZE";
 
   const freezeGateJson = {
     milestone: "crawler_engine_accuracy",
-    decision: knownAccuracyBlockers.length === 0 ? "READY_TO_FREEZE" : "NOT_READY_TO_FREEZE",
+    decision,
     gitSha: header.gitShaFull,
     verificationRunId: header.verificationRunId,
     generatedAt: new Date().toISOString(),
