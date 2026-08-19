@@ -34,3 +34,5 @@ legacy-stability.json
 manifest.json
 parity.json
 artifacts/
+*freeze-gate*.json
+apps/backend/*freeze-gate*.json
