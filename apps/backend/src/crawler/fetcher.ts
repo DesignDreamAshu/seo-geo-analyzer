@@ -1,5 +1,5 @@
 import axios, { AxiosResponse } from "axios";
-import type { ExternalLinkStatus, RedirectHop } from "./types";
+import type { ExternalLinkEvidence, ExternalLinkOutcome, ExternalLinkStatus, RedirectHop } from "./types";
 
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (compatible; DreamSEOBot/1.0; +https://dreamseo.dev/bot)";
@@ -93,23 +93,57 @@ export async function fetchPageHtml(
  */
 export async function verifyLinkTarget(
   targetUrl: string,
+  sourcePageUrl = "",
+  rawHref = "",
   timeoutMs = 8000,
   signal?: AbortSignal,
-): Promise<{
-  statusCode: number | null;
-  statusCategory: ExternalLinkStatus;
-  redirectHops: RedirectHop[];
-  responseTimeMs: number;
-}> {
+): Promise<ExternalLinkEvidence> {
   const startedAt = Date.now();
   const redirectHops: RedirectHop[] = [];
+  const checkedAt = new Date().toISOString();
+
+  // Validate URL scheme first
+  try {
+    const parsed = new URL(targetUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return {
+        rawHref: rawHref || targetUrl,
+        resolvedUrl: targetUrl,
+        normalizedUrl: targetUrl,
+        sourcePageUrl,
+        verificationMethod: "http_get",
+        requestMethod: "GET",
+        httpStatus: null,
+        finalUrl: targetUrl,
+        redirectChain: redirectHops,
+        outcome: "unsupported_scheme",
+        reason: `Unsupported URL protocol: ${parsed.protocol}`,
+        checkedAt,
+      };
+    }
+  } catch {
+    return {
+      rawHref: rawHref || targetUrl,
+      resolvedUrl: targetUrl,
+      normalizedUrl: targetUrl,
+      sourcePageUrl,
+      verificationMethod: "http_get",
+      requestMethod: "GET",
+      httpStatus: null,
+      finalUrl: targetUrl,
+      redirectChain: redirectHops,
+      outcome: "unsupported_scheme",
+      reason: "Malformed URL target",
+      checkedAt,
+    };
+  }
 
   try {
     const response = await axios.get(targetUrl, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        Accept: "*/*",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
       timeout: timeoutMs,
       maxRedirects: 5,
@@ -123,61 +157,153 @@ export async function verifyLinkTarget(
       response.data.destroy();
     }
 
-    const responseTimeMs = Date.now() - startedAt;
     const status = response.status;
+    const finalUrl = (response.request as any)?.res?.responseUrl || targetUrl;
 
-    // Classify Bot-Blocked platforms (LinkedIn 999, Cloudflare 403, Glassdoor 403/429, etc.)
-    if (status === 403 || status === 429 || status === 999) {
+    // Track redirect if finalUrl differs from targetUrl
+    if (finalUrl !== targetUrl) {
+      redirectHops.push({
+        statusCode: 301,
+        fromUrl: targetUrl,
+        toUrl: finalUrl,
+      });
+    }
+
+    // 1. Bot-Blocked / Rate-Limited Platforms (LinkedIn 999, Cloudflare 403, Glassdoor 403/429, ServiceNow Store 403)
+    if (status === 429) {
       return {
-        statusCode: status,
-        statusCategory: "bot_blocked_inconclusive",
-        redirectHops,
-        responseTimeMs,
+        rawHref: rawHref || targetUrl,
+        resolvedUrl: targetUrl,
+        normalizedUrl: targetUrl,
+        sourcePageUrl,
+        verificationMethod: "http_get",
+        requestMethod: "GET",
+        httpStatus: status,
+        finalUrl,
+        redirectChain: redirectHops,
+        outcome: "rate_limited_inconclusive",
+        reason: `Target server rate limited verification request (HTTP ${status})`,
+        checkedAt,
       };
     }
 
-    if (status >= 200 && status < 400) {
+    if (status === 403 || status === 999 || status === 401) {
       return {
-        statusCode: status,
-        statusCategory: "reachable",
-        redirectHops,
-        responseTimeMs,
+        rawHref: rawHref || targetUrl,
+        resolvedUrl: targetUrl,
+        normalizedUrl: targetUrl,
+        sourcePageUrl,
+        verificationMethod: "http_get",
+        requestMethod: "GET",
+        httpStatus: status,
+        finalUrl,
+        redirectChain: redirectHops,
+        outcome: "bot_blocked_inconclusive",
+        reason: `Target server bot-shield or authentication returned HTTP ${status} (requires browser review)`,
+        checkedAt,
       };
     }
 
-    if (status >= 400) {
+    // 2. Redirected or Success 2xx/3xx
+    if (status >= 200 && status < 300) {
       return {
-        statusCode: status,
-        statusCategory: "confirmed_broken",
-        redirectHops,
-        responseTimeMs,
+        rawHref: rawHref || targetUrl,
+        resolvedUrl: targetUrl,
+        normalizedUrl: targetUrl,
+        sourcePageUrl,
+        verificationMethod: "http_get",
+        requestMethod: "GET",
+        httpStatus: status,
+        finalUrl,
+        redirectChain: redirectHops,
+        outcome: redirectHops.length > 0 ? "redirected_ok" : "confirmed_ok",
+        reason: `Target reachable with HTTP ${status}`,
+        checkedAt,
+      };
+    }
+
+    // 3. Definitive Broken Status (404 Not Found, 410 Gone)
+    if (status === 404 || status === 410) {
+      return {
+        rawHref: rawHref || targetUrl,
+        resolvedUrl: targetUrl,
+        normalizedUrl: targetUrl,
+        sourcePageUrl,
+        verificationMethod: "http_get",
+        requestMethod: "GET",
+        httpStatus: status,
+        finalUrl,
+        redirectChain: redirectHops,
+        outcome: "confirmed_broken",
+        reason: `Target returned definitive broken response: HTTP ${status}`,
+        checkedAt,
+      };
+    }
+
+    // 4. Other 4xx / 5xx responses
+    if (status >= 500) {
+      return {
+        rawHref: rawHref || targetUrl,
+        resolvedUrl: targetUrl,
+        normalizedUrl: targetUrl,
+        sourcePageUrl,
+        verificationMethod: "http_get",
+        requestMethod: "GET",
+        httpStatus: status,
+        finalUrl,
+        redirectChain: redirectHops,
+        outcome: "manual_review",
+        reason: `Target server error HTTP ${status}`,
+        checkedAt,
       };
     }
 
     return {
-      statusCode: status,
-      statusCategory: "reachable",
-      redirectHops,
-      responseTimeMs,
+      rawHref: rawHref || targetUrl,
+      resolvedUrl: targetUrl,
+      normalizedUrl: targetUrl,
+      sourcePageUrl,
+      verificationMethod: "http_get",
+      requestMethod: "GET",
+      httpStatus: status,
+      finalUrl,
+      redirectChain: redirectHops,
+      outcome: "confirmed_ok",
+      reason: `Target reachable with HTTP ${status}`,
+      checkedAt,
     };
   } catch (error: any) {
-    const responseTimeMs = Date.now() - startedAt;
-
     if (error.code === "ECONNABORTED" || error.message?.includes("timeout")) {
       return {
-        statusCode: null,
-        statusCategory: "timeout",
-        redirectHops,
-        responseTimeMs,
+        rawHref: rawHref || targetUrl,
+        resolvedUrl: targetUrl,
+        normalizedUrl: targetUrl,
+        sourcePageUrl,
+        verificationMethod: "http_get",
+        requestMethod: "GET",
+        httpStatus: null,
+        finalUrl: targetUrl,
+        redirectChain: redirectHops,
+        outcome: "timeout_inconclusive",
+        reason: "Request timed out during external verification",
+        checkedAt,
       };
     }
 
     if (error.code === "ENOTFOUND" || error.code === "EAI_AGAIN") {
       return {
-        statusCode: null,
-        statusCategory: "dns_failure",
-        redirectHops,
-        responseTimeMs,
+        rawHref: rawHref || targetUrl,
+        resolvedUrl: targetUrl,
+        normalizedUrl: targetUrl,
+        sourcePageUrl,
+        verificationMethod: "http_get",
+        requestMethod: "GET",
+        httpStatus: null,
+        finalUrl: targetUrl,
+        redirectChain: redirectHops,
+        outcome: "dns_failure",
+        reason: `Domain name resolution failed: ${error.code}`,
+        checkedAt,
       };
     }
 
@@ -187,18 +313,34 @@ export async function verifyLinkTarget(
       error.message?.includes("certificate")
     ) {
       return {
-        statusCode: null,
-        statusCategory: "ssl_failure",
-        redirectHops,
-        responseTimeMs,
+        rawHref: rawHref || targetUrl,
+        resolvedUrl: targetUrl,
+        normalizedUrl: targetUrl,
+        sourcePageUrl,
+        verificationMethod: "http_get",
+        requestMethod: "GET",
+        httpStatus: null,
+        finalUrl: targetUrl,
+        redirectChain: redirectHops,
+        outcome: "ssl_failure",
+        reason: `SSL/TLS handshake failure: ${error.message}`,
+        checkedAt,
       };
     }
 
     return {
-      statusCode: null,
-      statusCategory: "confirmed_broken",
-      redirectHops,
-      responseTimeMs,
+      rawHref: rawHref || targetUrl,
+      resolvedUrl: targetUrl,
+      normalizedUrl: targetUrl,
+      sourcePageUrl,
+      verificationMethod: "http_get",
+      requestMethod: "GET",
+      httpStatus: null,
+      finalUrl: targetUrl,
+      redirectChain: redirectHops,
+      outcome: "network_failure",
+      reason: `Network error during verification: ${error.message}`,
+      checkedAt,
     };
   }
 }

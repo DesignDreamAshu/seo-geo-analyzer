@@ -19,6 +19,19 @@ export type IndexabilityStatus =
   | "utility_resource"
   | "unknown_manual_review";
 
+export type ExternalLinkOutcome =
+  | "confirmed_ok"
+  | "confirmed_broken"
+  | "redirected_ok"
+  | "bot_blocked_inconclusive"
+  | "rate_limited_inconclusive"
+  | "timeout_inconclusive"
+  | "dns_failure"
+  | "ssl_failure"
+  | "network_failure"
+  | "unsupported_scheme"
+  | "manual_review";
+
 export type ExternalLinkStatus =
   | "reachable"
   | "confirmed_broken"
@@ -44,7 +57,13 @@ export type ImageAltState =
   | "empty_alt_suspicious"
   | "descriptive_alt_present";
 
-export type RenderMode = "raw" | "rendered" | "raw_plus_rendered";
+export type RenderMode =
+  | "raw"
+  | "playwright_rendered"
+  | "raw_plus_playwright"
+  | "schema_enriched"
+  | "raw_plus_schema"
+  | "manual_review";
 
 export type RenderConfidence = "high" | "medium" | "low" | "manual_review";
 
@@ -135,6 +154,36 @@ export interface OutlinkEntry {
   statusCategory?: ExternalLinkStatus | "internal_ok" | "internal_broken" | "internal_redirect";
   redirectHops?: RedirectHop[];
   isBroken?: boolean;
+}
+
+export interface ExternalLinkEvidence {
+  rawHref: string;
+  resolvedUrl: string;
+  normalizedUrl: string;
+  sourcePageUrl: string;
+  verificationMethod: "http_get" | "http_head" | "playwright_browser";
+  requestMethod: "GET" | "HEAD";
+  httpStatus: number | null;
+  finalUrl: string;
+  redirectChain: RedirectHop[];
+  outcome: ExternalLinkOutcome;
+  reason: string;
+  checkedAt: string;
+}
+
+export interface ExternalLinkTelemetry {
+  uniqueExternalUrlsCount: number;
+  totalExternalOccurrences: number;
+  confirmedOkCount: number;
+  redirectedOkCount: number;
+  confirmedBrokenCount: number;
+  botBlockedCount: number;
+  rateLimitedCount: number;
+  timeoutCount: number;
+  networkDnsSslCount: number;
+  excludedPlaceholderHashCount: number;
+  excludedMailtoTelJsCount: number;
+  topExternalDomains: Array<{ domain: string; count: number }>;
 }
 
 export interface ImageAsset {
@@ -244,6 +293,7 @@ export interface CrawledPageData {
   renderedH1Count?: number;
   rawTitle: string | null;
   renderedTitle?: string | null;
+  structuredDataJobTitle?: string | null;
   soft404Status: Soft404Status;
 
   // Extracted Canonical DOM Features
@@ -428,5 +478,6 @@ export interface CrawlAuditResult {
     brokenInternalLinksCount: number;
     brokenExternalLinksCount: number;
     botBlockedExternalCount: number;
+    externalLinkTelemetry: ExternalLinkTelemetry;
   };
 }

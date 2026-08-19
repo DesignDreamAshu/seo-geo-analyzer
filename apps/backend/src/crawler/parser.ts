@@ -602,13 +602,13 @@ export function parseHtmlPage(
     }
   });
 
-  // Dynamic Shell / Client-Rendered Content Detection & Extraction
   let renderMode: RenderMode = "raw";
   let renderReason = "static_html";
   let renderConfidence: RenderConfidence = "high";
   let renderedWordCount = wordCount;
   let renderedH1Count = h1Tags.length;
   let renderedTitle = title;
+  let structuredDataJobTitle: string | null = null;
   let soft404Status: Soft404Status = "valid_page";
 
   const lowerHtml = html.toLowerCase();
@@ -616,20 +616,21 @@ export function parseHtmlPage(
   const isSuspiciousThinShell = wordCount < 50 && (hasEmbeddedJobData || lowerHtml.includes("__next_data__") || lowerHtml.includes("w-dyn-list"));
 
   if (isSuspiciousThinShell) {
-    renderMode = "raw_plus_rendered";
-    renderReason = "dynamic_cms_shell_detected";
+    renderMode = "schema_enriched";
+    renderReason = "dynamic_cms_shell_schema_enriched";
     renderConfidence = "manual_review";
 
-    // Attempt extracting job title or text from embedded JSON scripts
+    // Extract job title or description from embedded JSON schema without fabricating DOM H1
     $('script[type="application/ld+json"]').each((_, el) => {
       try {
         const data = JSON.parse($(el).html() || "{}");
-        if (data.title && !h1Tags.length) {
-          h1Tags.push(data.title);
-          renderedH1Count = 1;
+        if (data.title) {
+          structuredDataJobTitle = String(data.title).trim();
+          renderedTitle = structuredDataJobTitle;
         }
         if (data.description) {
-          renderedWordCount = Math.max(renderedWordCount, data.description.split(/\s+/).length);
+          const descWords = String(data.description).split(/\s+/).filter(Boolean).length;
+          renderedWordCount = Math.max(renderedWordCount, descWords);
         }
       } catch {}
     });
@@ -707,6 +708,7 @@ export function parseHtmlPage(
     renderedH1Count,
     rawTitle: title,
     renderedTitle,
+    structuredDataJobTitle,
     soft404Status,
 
     // Extracted Canonical DOM Features

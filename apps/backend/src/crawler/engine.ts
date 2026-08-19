@@ -301,6 +301,7 @@ export async function runSiteAuditCrawl(options: CrawlOptions): Promise<CrawlAud
       brokenInternalLinksCount: graphAnalysis.brokenInternalLinks.length,
       brokenExternalLinksCount: graphAnalysis.brokenExternalLinks.length,
       botBlockedExternalCount: graphAnalysis.botBlockedExternalLinks.length,
+      externalLinkTelemetry: graphAnalysis.externalLinkTelemetry,
     },
   };
 

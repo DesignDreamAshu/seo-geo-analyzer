@@ -484,19 +484,20 @@ export function evaluateAllDiagnosticRules(
         code: "CONTENT_MISSING_TITLE",
         category: "content_relevance",
         severity: "critical",
-        title: "Missing <title> tags",
-        description: "HTML pages are missing a title tag, preventing search engines from displaying an accurate search snippet.",
-        recommendation: "Add a concise, keyword-rich <title> tag between 30 and 60 characters to each page.",
+        title: "Missing <title> tag",
+        description: "Pages are missing a <title> tag, which is the most critical on-page SEO signal.",
+        recommendation: "Add a descriptive, keyword-relevant <title> tag inside the <head> section.",
         confidence: "confirmed",
         confidenceScore: 1.0,
         impactScore: 9,
         affectedPages: missingTitlePages,
       },
-      indexableHtmlPages.length
+      indexableHtmlPages.length || 1
     );
   }
 
   if (missingH1Pages.length > 0) {
+    const eligibleH1Count = eligibleContentPages.filter((p) => p.renderConfidence !== "manual_review").length || 1;
     addIssue(
       {
         code: "CONTENT_MISSING_H1",
@@ -510,7 +511,7 @@ export function evaluateAllDiagnosticRules(
         impactScore: 7,
         affectedPages: missingH1Pages,
       },
-      eligibleContentPages.length
+      eligibleH1Count
     );
   }
 
@@ -528,7 +529,7 @@ export function evaluateAllDiagnosticRules(
         impactScore: 4,
         affectedPages: multipleH1Pages,
       },
-      eligibleContentPages.length
+      eligibleContentPages.length || 1
     );
   }
 
@@ -546,11 +547,12 @@ export function evaluateAllDiagnosticRules(
         impactScore: 4,
         affectedPages: missingMetaDescPages,
       },
-      eligibleContentPages.length
+      eligibleContentPages.length || 1
     );
   }
 
   if (skippedHeadingPages.length > 0) {
+    const eligibleHeadingOutlinePages = indexableHtmlPages.filter((p) => p.headingsOutline.length >= 2).length || indexableHtmlPages.length || 1;
     addIssue(
       {
         code: "CONTENT_SKIPPED_HEADINGS",
@@ -564,11 +566,12 @@ export function evaluateAllDiagnosticRules(
         impactScore: 3,
         affectedPages: skippedHeadingPages,
       },
-      eligibleContentPages.length
+      eligibleHeadingOutlinePages
     );
   }
 
   if (emptyHeadingPages.length > 0) {
+    const eligibleEmptyHeadingPages = htmlPages.filter((p) => p.headingsOutline.length > 0).length || htmlPages.length || 1;
     addIssue(
       {
         code: "CONTENT_EMPTY_HEADING",
@@ -582,11 +585,21 @@ export function evaluateAllDiagnosticRules(
         impactScore: 2,
         affectedPages: emptyHeadingPages,
       },
-      htmlPages.length
+      eligibleEmptyHeadingPages
     );
   }
 
   if (thinContentPages.length > 0) {
+    const eligibleThinCount =
+      eligibleContentPages.filter(
+        (p) =>
+          p.renderConfidence !== "manual_review" &&
+          p.classification.primaryClass !== "utility_legal" &&
+          p.classification.primaryClass !== "thank_you_confirmation" &&
+          p.classification.primaryClass !== "form_application" &&
+          p.classification.primaryClass !== "search_filter"
+      ).length || 1;
+
     addIssue(
       {
         code: "CONTENT_THIN_WORD_COUNT",
@@ -600,7 +613,7 @@ export function evaluateAllDiagnosticRules(
         impactScore: 3,
         affectedPages: thinContentPages,
       },
-      eligibleContentPages.length
+      eligibleThinCount
     );
   }
 
@@ -1112,7 +1125,9 @@ export function evaluateAllDiagnosticRules(
     const catDeductions = catIssues.reduce((sum, iss) => sum + (iss.scorePenalty || 0), 0);
     const catScore = Math.max(0, Math.min(100, Math.round((100 - catDeductions * 2.5) * 10) / 10));
 
-    const isFullyEvaluated = cat !== "page_speed_assets"; // PSI Core Web Vitals measured in separate PSI module
+    const hasUnresolvedIndexability =
+      cat === "indexability" && crawledPages.some((p) => p.indexabilityStatus === "unknown_manual_review");
+    const isFullyEvaluated = cat !== "page_speed_assets" && !hasUnresolvedIndexability;
 
     return {
       category: cat,
@@ -1130,6 +1145,9 @@ export function evaluateAllDiagnosticRules(
     };
   });
 
+  // Central Invariant Validation: fail loudly in development if any rule violates mathematical bounds
+  validateIssueInvariants(issues, crawledPages);
+
   return {
     issues,
     categories,
@@ -1137,5 +1155,28 @@ export function evaluateAllDiagnosticRules(
     auditCoveragePercent,
     scoreBreakdown,
   };
+}
+
+/**
+ * Validates that all mathematical and diagnostic issue invariants hold without violation.
+ */
+export function validateIssueInvariants(issues: DiagnosticIssue[], crawledPages: CrawledPageData[]): void {
+  for (const issue of issues) {
+    if (issue.affectedUniquePages > issue.eligiblePageCount) {
+      const errorMsg = `[INVARIANT ERROR] Rule "${issue.code}": affectedUniquePages (${issue.affectedUniquePages}) exceeds eligiblePageCount (${issue.eligiblePageCount}). Denominator is invalid!`;
+      console.error(errorMsg);
+      throw new Error(errorMsg);
+    }
+    if (issue.affectedUniquePages > issue.affectedOccurrences) {
+      const errorMsg = `[INVARIANT ERROR] Rule "${issue.code}": affectedUniquePages (${issue.affectedUniquePages}) exceeds affectedOccurrences (${issue.affectedOccurrences})`;
+      console.error(errorMsg);
+      throw new Error(errorMsg);
+    }
+    if (issue.affectedRatio < 0 || issue.affectedRatio > 1.0) {
+      const errorMsg = `[INVARIANT ERROR] Rule "${issue.code}": affectedRatio (${issue.affectedRatio}) must be between 0.0 and 1.0`;
+      console.error(errorMsg);
+      throw new Error(errorMsg);
+    }
+  }
 }
 

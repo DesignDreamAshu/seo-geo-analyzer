@@ -203,8 +203,9 @@ const dynamicJobPage = parseHtmlPage(
   "https://www.botconsulting.io"
 );
 assert(dynamicJobPage.classification.primaryClass === "active_job", "Dynamic job page classified as active_job");
-assert(dynamicJobPage.renderMode === "raw_plus_rendered", "Dynamic shell detected -> renderMode === raw_plus_rendered");
-assert(dynamicJobPage.h1Count === 1, "Extracted job title from JSON-LD schema -> h1Count === 1");
+assert(dynamicJobPage.renderMode === "schema_enriched", "Dynamic shell detected -> renderMode === schema_enriched");
+assert(dynamicJobPage.structuredDataJobTitle === "Lead Data Architect", "Extracted job title from JSON-LD schema -> structuredDataJobTitle");
+assert(dynamicJobPage.h1Count === 0, "DOM H1 remains 0 without fabrication");
 assert(dynamicJobPage.wordCount > 20, "Extracted description words from JSON-LD -> wordCount > 20");
 
 // 7. Legacy CMS Job fixture (/jobopenings/12345)
@@ -315,6 +316,20 @@ const mockGraph = {
   totalInternalLinks: 15,
   totalExternalLinks: 0,
   inlinksMap: new Map(),
+  externalLinkTelemetry: {
+    uniqueExternalUrlsCount: 0,
+    totalExternalOccurrences: 0,
+    confirmedOkCount: 0,
+    redirectedOkCount: 0,
+    confirmedBrokenCount: 0,
+    botBlockedCount: 0,
+    rateLimitedCount: 0,
+    timeoutCount: 0,
+    networkDnsSslCount: 0,
+    excludedPlaceholderHashCount: 0,
+    excludedMailtoTelJsCount: 0,
+    topExternalDomains: [],
+  },
 };
 
 const audit = evaluateAllDiagnosticRules(allPages, mockGraph, []);

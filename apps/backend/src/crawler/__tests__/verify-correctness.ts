@@ -153,6 +153,20 @@ const mockGraph = {
   totalInternalLinks: 5,
   totalExternalLinks: 0,
   inlinksMap: new Map(),
+  externalLinkTelemetry: {
+    uniqueExternalUrlsCount: 0,
+    totalExternalOccurrences: 0,
+    confirmedOkCount: 0,
+    redirectedOkCount: 0,
+    confirmedBrokenCount: 0,
+    botBlockedCount: 0,
+    rateLimitedCount: 0,
+    timeoutCount: 0,
+    networkDnsSslCount: 0,
+    excludedPlaceholderHashCount: 0,
+    excludedMailtoTelJsCount: 0,
+    topExternalDomains: [],
+  },
 };
 
 const evalResult = evaluateAllDiagnosticRules(mockPages, mockGraph, []);

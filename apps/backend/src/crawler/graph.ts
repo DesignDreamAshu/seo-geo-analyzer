@@ -2,6 +2,8 @@ import { normalizeUrl } from "./normalizer";
 import { verifyLinkTarget } from "./fetcher";
 import type {
   CrawledPageData,
+  ExternalLinkEvidence,
+  ExternalLinkTelemetry,
   InlinkEntry,
   SitemapUrlEntry,
 } from "./types";
@@ -13,12 +15,14 @@ export interface LinkGraphAnalysis {
   totalInternalLinks: number;
   totalExternalLinks: number;
   brokenInternalLinks: Array<{ sourceUrl: string; targetUrl: string; statusCode: number | null; anchorText: string }>;
-  brokenExternalLinks: Array<{ sourceUrl: string; targetUrl: string; statusCode: number | null; statusCategory: string; anchorText: string }>;
-  botBlockedExternalLinks: Array<{ sourceUrl: string; targetUrl: string; statusCode: number | null; anchorText: string }>;
+  brokenExternalLinks: Array<{ sourceUrl: string; targetUrl: string; statusCode: number | null; statusCategory: string; anchorText: string; evidence: ExternalLinkEvidence }>;
+  botBlockedExternalLinks: Array<{ sourceUrl: string; targetUrl: string; statusCode: number | null; anchorText: string; evidence: ExternalLinkEvidence }>;
+  externalLinkTelemetry: ExternalLinkTelemetry;
 }
 
 /**
- * Builds the bidirectional Link Graph, verifies broken external links, and detects sitemap orphans.
+ * Builds the bidirectional Link Graph, verifies broken external links with strict exclusion of placeholder/utility links,
+ * and compiles comprehensive external link telemetry.
  */
 export async function buildAndAnalyzeGraph(
   crawledPages: CrawledPageData[],
@@ -37,16 +41,20 @@ export async function buildAndAnalyzeGraph(
   const inlinksMap = new Map<string, InlinkEntry[]>();
   let totalInternalLinks = 0;
   let totalExternalLinks = 0;
+  let excludedPlaceholderHashCount = 0;
+  let excludedMailtoTelJsCount = 0;
 
-  const externalUrlsToVerify = new Map<string, Array<{ sourceUrl: string; anchorText: string }>>();
+  const externalUrlsToVerify = new Map<string, Array<{ sourceUrl: string; anchorText: string; rawHref: string }>>();
   const brokenInternalLinks: LinkGraphAnalysis["brokenInternalLinks"] = [];
   const brokenExternalLinks: LinkGraphAnalysis["brokenExternalLinks"] = [];
   const botBlockedExternalLinks: LinkGraphAnalysis["botBlockedExternalLinks"] = [];
 
-  // 1. Build Inlinks and classify Internal Link Targets
+  const externalDomainCounts = new Map<string, number>();
+
+  // 1. Classify Outlinks & Segregate External Navigational URLs from Placeholders/Utilities
   for (const page of crawledPages) {
     for (const outlink of page.outlinks) {
-      if (outlink.isInternal) {
+      if (outlink.isInternal || outlink.linkClassification === "internal_navigation") {
         totalInternalLinks++;
         const targetNorm = outlink.normalizedTargetUrl;
 
@@ -71,53 +79,147 @@ export async function buildAndAnalyzeGraph(
             anchorText: outlink.anchorText,
           });
         }
-      } else {
-        totalExternalLinks++;
-        const extTarget = outlink.targetUrl;
-        if (!externalUrlsToVerify.has(extTarget)) {
-          externalUrlsToVerify.set(extTarget, []);
+      } else if (
+        outlink.linkClassification === "placeholder_hash" ||
+        outlink.linkClassification === "fragment" ||
+        outlink.rawHref === "#" ||
+        outlink.rawHref.startsWith("#")
+      ) {
+        // Explicitly exclude placeholder / fragment links from external verification queue
+        excludedPlaceholderHashCount++;
+      } else if (
+        outlink.linkClassification === "mailto" ||
+        outlink.linkClassification === "tel" ||
+        outlink.linkClassification === "javascript_action" ||
+        outlink.rawHref.startsWith("mailto:") ||
+        outlink.rawHref.startsWith("tel:") ||
+        outlink.rawHref.startsWith("javascript:")
+      ) {
+        // Explicitly exclude non-HTTP scheme actions
+        excludedMailtoTelJsCount++;
+      } else if (outlink.linkClassification === "external") {
+        // Genuine external link candidate
+        const extTarget = outlink.resolvedAbsoluteHref || outlink.targetUrl;
+        try {
+          const parsed = new URL(extTarget);
+          if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+            totalExternalLinks++;
+            externalDomainCounts.set(parsed.hostname, (externalDomainCounts.get(parsed.hostname) || 0) + 1);
+
+            if (!externalUrlsToVerify.has(extTarget)) {
+              externalUrlsToVerify.set(extTarget, []);
+            }
+            externalUrlsToVerify.get(extTarget)!.push({
+              sourceUrl: page.url,
+              anchorText: outlink.anchorText,
+              rawHref: outlink.rawHref,
+            });
+          } else {
+            excludedMailtoTelJsCount++;
+          }
+        } catch {
+          // Invalid URL format
+          excludedMailtoTelJsCount++;
         }
-        externalUrlsToVerify.get(extTarget)!.push({
-          sourceUrl: page.url,
-          anchorText: outlink.anchorText,
-        });
       }
     }
   }
 
-  // 2. Verify Sampled External Links (Concurrently with limit)
-  const MAX_EXTERNAL_CHECKS = 25; // Sample check external links to prevent crawl slowdown
+  // 2. Verify External Links Concurrently with Safe Limit
+  const MAX_EXTERNAL_CHECKS = 30; // Sample check distinct external targets
   const externalEntries = Array.from(externalUrlsToVerify.entries()).slice(0, MAX_EXTERNAL_CHECKS);
+
+  let confirmedOkCount = 0;
+  let redirectedOkCount = 0;
+  let confirmedBrokenCount = 0;
+  let botBlockedCount = 0;
+  let rateLimitedCount = 0;
+  let timeoutCount = 0;
+  let networkDnsSslCount = 0;
 
   await Promise.all(
     externalEntries.map(async ([targetUrl, sources]) => {
       if (signal?.aborted) return;
-      const checkResult = await verifyLinkTarget(targetUrl, 6000, signal);
+      const primarySource = sources[0];
+      const checkResult = await verifyLinkTarget(
+        targetUrl,
+        primarySource.sourceUrl,
+        primarySource.rawHref,
+        7000,
+        signal
+      );
 
-      if (checkResult.statusCategory === "confirmed_broken") {
-        for (const src of sources) {
-          brokenExternalLinks.push({
-            sourceUrl: src.sourceUrl,
-            targetUrl,
-            statusCode: checkResult.statusCode,
-            statusCategory: checkResult.statusCategory,
-            anchorText: src.anchorText,
-          });
-        }
-      } else if (checkResult.statusCategory === "bot_blocked_inconclusive") {
-        for (const src of sources) {
-          botBlockedExternalLinks.push({
-            sourceUrl: src.sourceUrl,
-            targetUrl,
-            statusCode: checkResult.statusCode,
-            anchorText: src.anchorText,
-          });
-        }
+      switch (checkResult.outcome) {
+        case "confirmed_ok":
+          confirmedOkCount += sources.length;
+          break;
+        case "redirected_ok":
+          redirectedOkCount += sources.length;
+          break;
+        case "confirmed_broken":
+          confirmedBrokenCount += sources.length;
+          for (const src of sources) {
+            brokenExternalLinks.push({
+              sourceUrl: src.sourceUrl,
+              targetUrl,
+              statusCode: checkResult.httpStatus,
+              statusCategory: "confirmed_broken",
+              anchorText: src.anchorText,
+              evidence: checkResult,
+            });
+          }
+          break;
+        case "bot_blocked_inconclusive":
+          botBlockedCount += sources.length;
+          for (const src of sources) {
+            botBlockedExternalLinks.push({
+              sourceUrl: src.sourceUrl,
+              targetUrl,
+              statusCode: checkResult.httpStatus,
+              anchorText: src.anchorText,
+              evidence: checkResult,
+            });
+          }
+          break;
+        case "rate_limited_inconclusive":
+          rateLimitedCount += sources.length;
+          break;
+        case "timeout_inconclusive":
+          timeoutCount += sources.length;
+          break;
+        case "dns_failure":
+        case "ssl_failure":
+        case "network_failure":
+          networkDnsSslCount += sources.length;
+          break;
+        default:
+          break;
       }
     })
   );
 
-  // 3. Detect True Sitemap Orphans
+  // 3. Compile Top External Domains
+  const topExternalDomains = Array.from(externalDomainCounts.entries())
+    .map(([domain, count]) => ({ domain, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  const externalLinkTelemetry: ExternalLinkTelemetry = {
+    uniqueExternalUrlsCount: externalUrlsToVerify.size,
+    totalExternalOccurrences: totalExternalLinks,
+    confirmedOkCount,
+    redirectedOkCount,
+    confirmedBrokenCount,
+    botBlockedCount,
+    rateLimitedCount,
+    timeoutCount,
+    networkDnsSslCount,
+    excludedPlaceholderHashCount,
+    excludedMailtoTelJsCount,
+    topExternalDomains,
+  };
+
+  // 4. Detect True Sitemap Orphans
   const sitemapOrphans: SitemapUrlEntry[] = [];
   for (const sitemapEntry of sitemapUrls) {
     const norm = normalizeUrl(sitemapEntry.loc);
@@ -126,7 +228,7 @@ export async function buildAndAnalyzeGraph(
     }
   }
 
-  // 4. Detect Crawl-Isolated Pages (Depth > 3 with only 1 inlink)
+  // 5. Detect Crawl-Isolated Pages (Depth >= 4 with only <= 1 inlink)
   const crawlIsolatedPages: string[] = [];
   for (const page of crawledPages) {
     if (page.depth >= 4) {
@@ -146,5 +248,6 @@ export async function buildAndAnalyzeGraph(
     brokenInternalLinks,
     brokenExternalLinks,
     botBlockedExternalLinks,
+    externalLinkTelemetry,
   };
 }
