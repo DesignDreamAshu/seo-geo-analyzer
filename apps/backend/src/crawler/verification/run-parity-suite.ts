@@ -410,13 +410,14 @@ async function extractPlaywrightOracleFacts(browser: any, url: string): Promise<
       let unlabelledCount = 0;
       inputs.forEach((input: any) => {
         const id = input.getAttribute("id");
-        const hasLabel = id ? Boolean(document.querySelector(`label[for="${id}"]`)) : false;
-        const hasAria = Boolean(
-          input.getAttribute("aria-label") ||
-            input.getAttribute("aria-labelledby") ||
-            input.getAttribute("title")
-        );
-        const isWrappedInLabel = Boolean(input.closest("label") || (input.labels && input.labels.length > 0));
+        const labelEl = id ? document.querySelector(`label[for="${id}"]`) : null;
+        const hasLabel = Boolean(labelEl && (labelEl.textContent || "").trim());
+        const ariaLabel = (input.getAttribute("aria-label") || "").trim();
+        const ariaLabelledBy = input.getAttribute("aria-labelledby");
+        const title = (input.getAttribute("title") || "").trim();
+        const hasAria = Boolean(ariaLabel || ariaLabelledBy || title);
+        const wrappingLabel = input.closest("label");
+        const isWrappedInLabel = Boolean(wrappingLabel && (wrappingLabel.textContent || "").trim());
         if (!hasLabel && !hasAria && !isWrappedInLabel) {
           unlabelledCount++;
         }
