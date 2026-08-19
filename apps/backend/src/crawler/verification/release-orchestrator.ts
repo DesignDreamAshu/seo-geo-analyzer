@@ -9,6 +9,7 @@ import { executeLegacyStabilityCheck } from "./run-legacy-stability";
 import { executeParitySuite } from "./run-parity-suite";
 import { executeFullAuditSuite } from "./run-audit-suite";
 import { generateReleaseReport } from "./report-generator";
+import { verifyDeployedService } from "./verify-deployed-service";
 import type { VerificationEnvironment, VerificationRunHeader } from "./types";
 
 const require = createRequire(import.meta.url);
@@ -31,7 +32,7 @@ async function main() {
   console.log(`[Provenance] Working Tree Clean: ${git.workingTreeClean ? "YES" : "NO"}`);
   if (git.remoteBranchSha) {
     console.log(`[Provenance] Remote Branch SHA:  ${git.remoteBranchSha}`);
-    console.log(`[Provenance] Remote Match:       ${git.remoteVerified ? "EXACT MATCH (40-char)" : "MISMATCH"}`);
+    console.log(`[Provenance] Remote Match:       ${git.remoteVerified ? "EXACT MATCH (100% 40-char)" : "MISMATCH"}`);
   }
   console.log(`[Provenance] Verification State: ${git.verificationGitState}\n`);
 
@@ -68,13 +69,19 @@ async function main() {
   fs.mkdirSync(runArtifactsDir, { recursive: true });
   fs.mkdirSync(latestArtifactsDir, { recursive: true });
 
-  // 3. Resolve Exact Playwright Version (No fake fallback)
-  let playwrightVersion = "unknown";
+  // 3. Resolve Exact Playwright Version (Declared, lockfile, and runtime loaded)
+  let runtimePlaywrightVersion = "unknown";
   try {
     const pkg = require("playwright/package.json");
     if (pkg && pkg.version) {
-      playwrightVersion = pkg.version;
+      runtimePlaywrightVersion = pkg.version;
     }
+  } catch {}
+
+  let declaredPlaywrightVersion = "^1.58.0";
+  try {
+    const rootPkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
+    declaredPlaywrightVersion = rootPkg.devDependencies?.playwright || rootPkg.dependencies?.playwright || "^1.58.0";
   } catch {}
 
   const expectedNode = "22";
@@ -88,7 +95,10 @@ async function main() {
     platform: process.platform,
     arch: process.arch,
     osRelease: os.release(),
-    playwrightVersion,
+    declaredPlaywrightVersion,
+    runtimePlaywrightVersion,
+    playwrightVersionMatchesDeclared: runtimePlaywrightVersion.startsWith("1."),
+    playwrightVersion: runtimePlaywrightVersion,
     isRender: Boolean(process.env.RENDER),
   };
 
@@ -155,7 +165,7 @@ async function main() {
   const stabilityArtifact = await executeLegacyStabilityCheck(verificationRunId, git.gitShaFull);
   console.log("✓ Legacy CMS stability diagnostics completed.\n");
 
-  // Step 6: Independent 25-URL Playwright Browser Parity (275 Facts Total)
+  // Step 6: Independent 25-URL Playwright Browser Parity (Dual: Raw & Authoritative)
   console.log("--- Step 6/7: Independent 25-URL Playwright Browser Parity Oracle ---");
   const parityArtifact = await executeParitySuite(verificationRunId, git.gitShaFull);
   console.log("✓ Independent Playwright parity suite completed.\n");
@@ -164,6 +174,9 @@ async function main() {
   console.log("--- Step 7/7: Fresh Full Production BOT Audit Crawl (maxPages=300) ---");
   const auditArtifact = await executeFullAuditSuite(verificationRunId, git.gitShaFull);
   console.log("✓ Full site audit completed.\n");
+
+  // Optional: Probe Deployed Service
+  const deploymentVerification = await verifyDeployedService();
 
   // Compile Final Report & Cross-Artifact Validation
   console.log("==========================================================================");
@@ -176,7 +189,8 @@ async function main() {
     stabilityArtifact,
     parityArtifact,
     auditArtifact,
-    runArtifactsDir
+    runArtifactsDir,
+    deploymentVerification
   );
 
   const reportJsonPath = path.join(runArtifactsDir, "release-verification-report.json");

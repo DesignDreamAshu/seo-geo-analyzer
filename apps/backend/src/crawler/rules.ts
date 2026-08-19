@@ -10,6 +10,7 @@ import type {
   Severity,
   SitemapUrlEntry,
 } from "./types";
+import { getAuthoritativeFacts } from "./types";
 import type { LinkGraphAnalysis } from "./graph";
 
 /**
@@ -349,81 +350,101 @@ export function evaluateAllDiagnosticRules(
   const thinContentPages: DiagnosticIssue["affectedPages"] = [];
 
   for (const page of indexableHtmlPages) {
-    const isStandardContentPage =
-      page.classification.primaryClass === "homepage" ||
-      page.classification.primaryClass === "marketing_landing" ||
-      page.classification.primaryClass === "article_blog" ||
-      page.classification.primaryClass === "active_job" ||
-      page.classification.primaryClass === "product_job_detail" ||
-      page.classification.primaryClass === "category_listing";
+    const isStandardContentPage = eligibleContentPages.some((p) => p.url === page.url);
+    const facts = getAuthoritativeFacts(page);
+    const factSource = facts.source === "rendered" ? "rendered_playwright" : "raw_http";
 
     // Title
-    if (!page.title) {
+    if (!facts.title) {
       missingTitlePages.push({
         url: page.url,
         evidence: {
           observed: "Page has no <title> tag in <head>",
           crawlTimestamp: page.crawledAt,
-          sourceMode: page.sourceMode,
+          sourceMode: factSource,
           sourceUrl: page.url,
+          factSource,
+          authoritativeFactSource: facts.source,
+          renderReason: facts.renderReason,
+          renderConfidence: facts.renderConfidence,
         },
       });
-    } else if (isStandardContentPage && page.titleLength < 25) {
+    } else if (isStandardContentPage && facts.title.length < 25) {
       titleTooShortPages.push({
         url: page.url,
         evidence: {
-          observed: `Title is only ${page.titleLength} characters: "${page.title}"`,
+          observed: `Title is only ${facts.title.length} characters: "${facts.title}"`,
           crawlTimestamp: page.crawledAt,
-          sourceMode: page.sourceMode,
+          sourceMode: factSource,
           sourceUrl: page.url,
-          codeSnippet: `<title>${page.title}</title>`,
+          codeSnippet: `<title>${facts.title}</title>`,
+          factSource,
+          authoritativeFactSource: facts.source,
+          renderReason: facts.renderReason,
+          renderConfidence: facts.renderConfidence,
         },
       });
-    } else if (isStandardContentPage && page.titleLength > 65) {
+    } else if (isStandardContentPage && facts.title.length > 65) {
       titleTooLongPages.push({
         url: page.url,
         evidence: {
-          observed: `Title is ${page.titleLength} characters (likely truncated in SERPs): "${page.title}"`,
+          observed: `Title is ${facts.title.length} characters (likely truncated in SERPs): "${facts.title}"`,
           crawlTimestamp: page.crawledAt,
-          sourceMode: page.sourceMode,
+          sourceMode: factSource,
           sourceUrl: page.url,
-          codeSnippet: `<title>${page.title}</title>`,
+          codeSnippet: `<title>${facts.title}</title>`,
+          factSource,
+          authoritativeFactSource: facts.source,
+          renderReason: facts.renderReason,
+          renderConfidence: facts.renderConfidence,
         },
       });
     }
 
     // Meta description
-    if (!page.metaDescription && isStandardContentPage) {
+    if (!facts.metaDescription && isStandardContentPage) {
       missingMetaDescPages.push({
         url: page.url,
         evidence: {
           observed: "No <meta name=\"description\"> tag found on standard content page",
           crawlTimestamp: page.crawledAt,
-          sourceMode: page.sourceMode,
+          sourceMode: factSource,
           sourceUrl: page.url,
+          factSource,
+          authoritativeFactSource: facts.source,
+          renderReason: facts.renderReason,
+          renderConfidence: facts.renderConfidence,
         },
       });
     }
 
     // Separate H1 Checks (guarded for render confidence)
-    if (page.h1Count === 0 && isStandardContentPage && page.renderConfidence !== "manual_review") {
+    if (facts.h1Count === 0 && isStandardContentPage && facts.renderConfidence !== "manual_review") {
       missingH1Pages.push({
         url: page.url,
         evidence: {
           observed: `Missing <h1> tag on ${page.classification.primaryClass} page (H1 count = 0)`,
           crawlTimestamp: page.crawledAt,
-          sourceMode: page.sourceMode,
+          sourceMode: factSource,
           sourceUrl: page.url,
+          factSource,
+          authoritativeFactSource: facts.source,
+          renderReason: facts.renderReason,
+          renderConfidence: facts.renderConfidence,
         },
       });
-    } else if (page.h1Count > 1 && isStandardContentPage) {
+    } else if (facts.h1Count > 1 && isStandardContentPage) {
       multipleH1Pages.push({
         url: page.url,
         evidence: {
-          observed: `Found ${page.h1Count} <h1> tags: ${page.h1s.map((h) => `"${h}"`).join(", ")}`,
+          observed: `Found ${facts.h1Count} <h1> tags: ${facts.h1Texts.map((h) => `"${h}"`).join(", ")}`,
           crawlTimestamp: page.crawledAt,
-          sourceMode: page.sourceMode,
+          sourceMode: factSource,
           sourceUrl: page.url,
+          factSource,
+          authoritativeFactSource: facts.source,
+          renderReason: facts.renderReason,
+          renderConfidence: facts.renderConfidence,
         },
       });
     }
@@ -435,44 +456,52 @@ export function evaluateAllDiagnosticRules(
         evidence: {
           observed: page.headingsHierarchyIssues[0],
           crawlTimestamp: page.crawledAt,
-          sourceMode: page.sourceMode,
+          sourceMode: factSource,
           sourceUrl: page.url,
           codeSnippet: page.headingsHierarchyIssues.slice(0, 2).join(" | "),
+          factSource,
+          authoritativeFactSource: facts.source,
         },
       });
     }
 
     // Empty Headings
-    const emptyHeadings = page.headingsOutline.filter((h) => !h.text || h.text.trim().length === 0);
+    const emptyHeadings = facts.headingsOutline.filter((h) => !h.text || h.text.trim().length === 0);
     if (emptyHeadings.length > 0) {
       emptyHeadingPages.push({
         url: page.url,
         evidence: {
           observed: `Found ${emptyHeadings.length} empty heading tags without text content`,
           crawlTimestamp: page.crawledAt,
-          sourceMode: page.sourceMode,
+          sourceMode: factSource,
           sourceUrl: page.url,
           codeSnippet: emptyHeadings.map((h) => `<h${h.level}></h${h.level}>`).join(", "),
+          factSource,
+          authoritativeFactSource: facts.source,
         },
       });
     }
 
-    // Thin Content Check (Only Opportunity severity, never Critical)
+    // Thin Content Check (Using Authoritative Main Content Words)
     const isUtilityOrForm =
       page.classification.primaryClass === "utility_legal" ||
       page.classification.primaryClass === "thank_you_confirmation" ||
       page.classification.primaryClass === "form_application" ||
       page.classification.primaryClass === "search_filter" ||
-      page.renderConfidence === "manual_review";
-    const wordsToEvaluate = page.mainContentWordCount || page.wordCount;
+      facts.renderConfidence === "manual_review";
+    const wordsToEvaluate = facts.mainContentWordCount;
     if (!isUtilityOrForm && isStandardContentPage && wordsToEvaluate < 180) {
       thinContentPages.push({
         url: page.url,
         evidence: {
-          observed: `Main content text has only ${wordsToEvaluate} words on ${page.classification.primaryClass} page (Raw: ${page.rawDocumentWordCount || page.rawWordCount}, Visible: ${page.visibleBodyWordCount || page.wordCount})`,
+          observed: `Authoritative main content text has only ${wordsToEvaluate} words on ${page.classification.primaryClass} page (Source: ${facts.source}, Visible: ${facts.visibleBodyWordCount})`,
           crawlTimestamp: page.crawledAt,
-          sourceMode: page.sourceMode,
+          sourceMode: factSource,
           sourceUrl: page.url,
+          factSource,
+          authoritativeFactSource: facts.source,
+          renderReason: facts.renderReason,
+          renderConfidence: facts.renderConfidence,
         },
       });
     }
@@ -591,14 +620,7 @@ export function evaluateAllDiagnosticRules(
 
   if (thinContentPages.length > 0) {
     const eligibleThinCount =
-      eligibleContentPages.filter(
-        (p) =>
-          p.renderConfidence !== "manual_review" &&
-          p.classification.primaryClass !== "utility_legal" &&
-          p.classification.primaryClass !== "thank_you_confirmation" &&
-          p.classification.primaryClass !== "form_application" &&
-          p.classification.primaryClass !== "search_filter"
-      ).length || 1;
+      eligibleContentPages.filter((p) => getAuthoritativeFacts(p).renderConfidence !== "manual_review").length || 1;
 
     addIssue(
       {
@@ -776,37 +798,53 @@ export function evaluateAllDiagnosticRules(
   const unlabelledFormPages: DiagnosticIssue["affectedPages"] = [];
 
   for (const page of htmlPages) {
-    if (!page.landmarks.hasMain && page.classification.primaryClass !== "utility_endpoint") {
+    const facts = getAuthoritativeFacts(page);
+    const factSource = facts.source === "rendered" ? "rendered_playwright" : "raw_http";
+
+    if (!facts.hasMainLandmark && page.classification.primaryClass !== "utility_endpoint") {
       missingMainPages.push({
         url: page.url,
         evidence: {
           observed: "Page is missing a semantic <main> or role='main' landmark container",
           crawlTimestamp: page.crawledAt,
-          sourceMode: page.sourceMode,
+          sourceMode: factSource,
           sourceUrl: page.url,
+          factSource,
+          authoritativeFactSource: facts.source,
+          renderReason: facts.renderReason,
+          renderConfidence: facts.renderConfidence,
         },
       });
-    } else if (page.landmarks.mainCount > 1) {
+    } else if (facts.landmarks.mainCount > 1) {
       multipleMainPages.push({
         url: page.url,
         evidence: {
-          observed: `Page contains ${page.landmarks.mainCount} separate <main> landmarks`,
+          observed: `Page contains ${facts.landmarks.mainCount} separate <main> landmarks`,
           crawlTimestamp: page.crawledAt,
-          sourceMode: page.sourceMode,
+          sourceMode: factSource,
           sourceUrl: page.url,
+          factSource,
+          authoritativeFactSource: facts.source,
+          renderReason: facts.renderReason,
+          renderConfidence: facts.renderConfidence,
         },
       });
     }
 
-    for (const form of page.forms) {
+    for (const form of facts.forms) {
       if (form.unlabelledCount > 0) {
         unlabelledFormPages.push({
           url: page.url,
           evidence: {
             observed: `Form contains ${form.unlabelledCount} unlabelled input controls without matching <label> or aria-label`,
             crawlTimestamp: page.crawledAt,
-            sourceMode: page.sourceMode,
+            sourceMode: factSource,
             sourceUrl: page.url,
+            factSource,
+            authoritativeFactSource: facts.source,
+            renderReason: facts.renderReason,
+            renderConfidence: facts.renderConfidence,
+            componentClassification: form.formClassification === "global_template_form" ? "global_template" : "page_primary",
             codeSnippet: form.controls.filter((c) => !c.isLabelled).map((c) => `<${c.tag} name="${c.name || c.id || ""}">`).join(", "),
           },
         });

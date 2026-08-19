@@ -2,8 +2,9 @@ import { nanoid } from "nanoid";
 import { normalizeUrl, isUrlInScope, isCrawlTrap } from "./normalizer";
 import { fetchAndParseRobotsTxt } from "./robots";
 import { fetchAllSitemaps } from "./sitemap";
-import { fetchPageHtml, sharedBrowserPool } from "./fetcher";
+import { fetchPageHtml } from "./fetcher";
 import { parseHtmlPage } from "./parser";
+import { processPageAuthoritatively } from "./page-processor";
 import { buildAndAnalyzeGraph } from "./graph";
 import { evaluateAllDiagnosticRules } from "./rules";
 import type {
@@ -121,8 +122,8 @@ export async function runSiteAuditCrawl(options: CrawlOptions): Promise<CrawlAud
           // Fetch HTML with per-page timeout
           const fetchRes = await fetchPageHtml(item.url, options.timeoutMs || 10000, options.signal);
 
-          // Parse HTML
-          const pageData = parseHtmlPage(
+          // Process Page Authoritatively (Raw Parsing + Conditional Render + Authoritative Facts)
+          const pageData = await processPageAuthoritatively(
             item.url,
             itemNormalized,
             fetchRes.finalUrl,
@@ -132,150 +133,14 @@ export async function runSiteAuditCrawl(options: CrawlOptions): Promise<CrawlAud
             fetchRes.headers,
             fetchRes.responseTimeMs,
             item.depth,
-            seedNormalized,
-            options.allowSubdomains,
-            isDisallowed,
-          );
-
-          // Conditional Render Trigger for dynamic CMS shells / interactive forms
-          if (pageData.resourceType === "html_page" && pageData.statusCode === 200) {
-            const urlLower = pageData.url.toLowerCase();
-            const pClass = pageData.classification.primaryClass;
-            const h1First = pageData.h1s[0]?.toLowerCase().trim();
-            const shouldRender =
-              (pageData.visibleBodyWordCount < 50 && (pClass === "active_job" || urlLower.includes("/job-openings/") || urlLower.includes("/servicenow-at-bot"))) ||
-              h1First === "heading" ||
-              ((pClass === "form_application" || urlLower.includes("/application")) && pageData.forms.length === 0);
-
-            if (shouldRender) {
-              try {
-                const browser = await sharedBrowserPool.getBrowser();
-                if (browser) {
-                  const ctx = await browser.newContext({
-                    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                  });
-                  const p = await ctx.newPage();
-                  await p.goto(pageData.url, { waitUntil: "domcontentloaded", timeout: 12000 });
-                  await p.waitForTimeout(400);
-
-                  const rendered = await p.evaluate(() => {
-                    const docTitle = document.title ? document.title.trim() : null;
-                    const metaDesc = document.querySelector('meta[name="description"]')?.getAttribute("content")?.trim() || null;
-                    const canonicalTag = document.querySelector('link[rel="canonical"]')?.getAttribute("href")?.trim() || null;
-                    const h1s = Array.from(document.querySelectorAll("h1")).map((n) => (n.textContent || "").trim()).filter(Boolean);
-
-                    const mainEl = document.querySelector("main, [role='main'], #main-content, .main-content") as HTMLElement | null;
-                    const bodyClone = document.body ? (document.body.cloneNode(true) as HTMLElement) : null;
-                    let visWords = 0;
-                    if (bodyClone) {
-                      bodyClone.querySelectorAll("script, style, noscript, svg, nav, footer, header").forEach((el) => el.remove());
-                      const t = (bodyClone.innerText || "").replace(/\s+/g, " ").trim();
-                      visWords = t ? t.split(/\s+/).filter(Boolean).length : 0;
-                    }
-                    let mainWords = visWords;
-                    if (mainEl) {
-                      const mc = mainEl.cloneNode(true) as HTMLElement;
-                      mc.querySelectorAll("script, style, noscript, svg, nav, footer, header").forEach((el) => el.remove());
-                      const mt = (mc.innerText || "").replace(/\s+/g, " ").trim();
-                      mainWords = mt ? mt.split(/\s+/).filter(Boolean).length : visWords;
-                    }
-
-                    const forms = Array.from(document.querySelectorAll("form")).map((f) => {
-                      const inputs = Array.from(f.querySelectorAll("input:not([type='hidden']):not([type='submit']):not([type='button']), textarea, select"));
-                      let unlabelled = 0;
-                      inputs.forEach((input) => {
-                        const id = input.getAttribute("id");
-                        const hasLabel = id ? Boolean(document.querySelector(`label[for="${id}"]`)) : false;
-                        const hasAria = Boolean(input.getAttribute("aria-label") || input.getAttribute("aria-labelledby"));
-                        const isWrapped = Boolean(input.closest("label"));
-                        if (!hasLabel && !hasAria && !isWrapped) unlabelled++;
-                      });
-                      return {
-                        id: f.id || undefined,
-                        action: f.action || undefined,
-                        method: f.method || undefined,
-                        controlCount: inputs.length,
-                        unlabelledCount: unlabelled,
-                        controls: inputs.map((c) => ({
-                          tag: c.tagName.toLowerCase(),
-                          type: c.getAttribute("type") || undefined,
-                          name: c.getAttribute("name") || undefined,
-                          id: c.getAttribute("id") || undefined,
-                          accessibleName: c.getAttribute("aria-label") || null,
-                          isLabelled: Boolean(c.getAttribute("aria-label") || (c.id && document.querySelector(`label[for="${c.id}"]`)) || c.closest("label")),
-                        })),
-                      };
-                    });
-
-                    const missingAlt = Array.from(document.querySelectorAll("img")).filter((img) => !img.hasAttribute("alt")).length;
-                    const hasMain = document.querySelectorAll("main, [role='main']").length > 0;
-
-                    return { docTitle, metaDesc, canonicalTag, h1s, visWords, mainWords, forms, missingAlt, hasMain };
-                  });
-
-                  await ctx.close();
-
-                  pageData.renderedFacts = {
-                    attempted: true,
-                    success: true,
-                    renderedAt: new Date().toISOString(),
-                    renderReason: "dynamic_shell_detected",
-                    renderConfidence: "high",
-                    title: rendered.docTitle,
-                    metaDescription: rendered.metaDesc,
-                    canonicalUrl: rendered.canonicalTag,
-                    h1Count: rendered.h1s.length,
-                    h1Texts: rendered.h1s,
-                    formCount: rendered.forms.length,
-                    unlabelledFormControlCount: rendered.forms.reduce((sum, f) => sum + f.unlabelledCount, 0),
-                    missingAltCount: rendered.missingAlt,
-                    visibleBodyWordCount: rendered.visWords,
-                    mainContentWordCount: rendered.mainWords,
-                    hasMainLandmark: rendered.hasMain,
-                  };
-
-                  pageData.authoritativeFacts = {
-                    source: "rendered",
-                    title: rendered.docTitle || pageData.title,
-                    metaDescription: rendered.metaDesc || pageData.metaDescription,
-                    canonicalUrl: rendered.canonicalTag || pageData.canonicalUrl,
-                    h1Count: rendered.h1s.length,
-                    h1Texts: rendered.h1s,
-                    formCount: rendered.forms.length,
-                    unlabelledFormControlCount: rendered.forms.reduce((sum, f) => sum + f.unlabelledCount, 0),
-                    missingAltCount: rendered.missingAlt,
-                    rawDocumentWordCount: pageData.rawDocumentWordCount,
-                    visibleBodyWordCount: rendered.visWords,
-                    mainContentWordCount: rendered.mainWords,
-                    hasMainLandmark: rendered.hasMain,
-                  };
-
-                  pageData.renderMode = "playwright_rendered";
-                  pageData.renderReason = "dynamic_shell_detected";
-                  pageData.renderConfidence = "high";
-                  if (rendered.docTitle) pageData.title = rendered.docTitle;
-                  if (rendered.h1s.length > 0) {
-                    pageData.h1s = rendered.h1s;
-                    pageData.h1Count = rendered.h1s.length;
-                    pageData.h1Tags = rendered.h1s;
-                  }
-                  if (rendered.forms.length > 0) {
-                    pageData.forms = rendered.forms;
-                  }
-                  pageData.visibleBodyWordCount = rendered.visWords;
-                  pageData.mainContentWordCount = rendered.mainWords;
-                  pageData.wordCount = rendered.mainWords > 0 ? rendered.mainWords : rendered.visWords;
-                }
-              } catch (rErr: any) {
-                pageData.renderedFacts = {
-                  attempted: true,
-                  success: false,
-                  renderReason: "dynamic_shell_detected",
-                  renderConfidence: "manual_review",
-                };
-              }
+            {
+              seedNormalized,
+              allowSubdomains: options.allowSubdomains,
+              isDisallowedByRobots: isDisallowed,
+              enableBrowserRendering: true,
+              renderBudgetAvailable: true,
             }
-          }
+          );
 
           crawledMap.set(itemNormalized, pageData);
           console.log(`[Crawler] [${crawledMap.size}/${maxPages}] Fetched: ${pageData.statusCode} | ${pageData.responseTimeMs}ms | ${item.url} (Title: "${pageData.title || "Untitled"}")`);

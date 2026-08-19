@@ -321,6 +321,7 @@ export interface FormFact {
   controlCount: number;
   unlabelledCount: number;
   controls: FormControlFact[];
+  formClassification?: "global_template_form" | "page_primary_form" | "unknown_form";
 }
 
 export interface LandmarkFacts {
@@ -332,19 +333,33 @@ export interface LandmarkFacts {
   asideCount: number;
 }
 
+export interface RenderDecision {
+  evaluated: boolean;
+  eligible: boolean;
+  triggered: boolean;
+  reasons: string[];
+  skippedReason?: "budget_exhausted" | "browser_unavailable" | "static_complete" | "non_html_or_non_200";
+  attempted: boolean;
+  success?: boolean;
+}
+
 export interface RawPageFacts {
   title: string | null;
   metaDescription: string | null;
   canonicalUrl: string | null;
   h1Count: number;
   h1Texts: string[];
+  forms: FormFact[];
   formCount: number;
   unlabelledFormControlCount: number;
   missingAltCount: number;
+  images: ImageAsset[];
   rawDocumentWordCount: number;
   visibleBodyWordCount: number;
   mainContentWordCount: number;
+  landmarks: LandmarkFacts;
   hasMainLandmark: boolean;
+  headingsOutline: HeadingOutlineItem[];
 }
 
 export interface RenderedPageFacts {
@@ -358,13 +373,17 @@ export interface RenderedPageFacts {
   canonicalUrl?: string | null;
   h1Count?: number;
   h1Texts?: string[];
+  forms?: FormFact[];
   formCount?: number;
   unlabelledFormControlCount?: number;
   missingAltCount?: number;
+  images?: ImageAsset[];
   rawDocumentWordCount?: number;
   visibleBodyWordCount?: number;
   mainContentWordCount?: number;
+  landmarks?: LandmarkFacts;
   hasMainLandmark?: boolean;
+  headingsOutline?: HeadingOutlineItem[];
 }
 
 export interface AuthoritativePageFacts {
@@ -374,13 +393,49 @@ export interface AuthoritativePageFacts {
   canonicalUrl: string | null;
   h1Count: number;
   h1Texts: string[];
+  forms: FormFact[];
   formCount: number;
   unlabelledFormControlCount: number;
   missingAltCount: number;
+  images: ImageAsset[];
   rawDocumentWordCount: number;
   visibleBodyWordCount: number;
   mainContentWordCount: number;
+  landmarks: LandmarkFacts;
   hasMainLandmark: boolean;
+  headingsOutline: HeadingOutlineItem[];
+  renderReason?: string;
+  renderConfidence?: RenderConfidence;
+}
+
+/**
+ * Authoritative facts accessor that ensures single source of truth.
+ */
+export function getAuthoritativeFacts(page: CrawledPageData): AuthoritativePageFacts {
+  if (page.authoritativeFacts) {
+    return page.authoritativeFacts;
+  }
+  return {
+    source: page.sourceMode === "rendered_playwright" ? "rendered" : "raw",
+    title: page.title,
+    metaDescription: page.metaDescription,
+    canonicalUrl: page.canonicalUrl,
+    h1Count: page.h1Count,
+    h1Texts: page.h1s,
+    forms: page.forms,
+    formCount: page.forms.length,
+    unlabelledFormControlCount: page.forms.reduce((sum, f) => sum + f.unlabelledCount, 0),
+    missingAltCount: page.images.filter((img) => !img.hasAltAttribute).length,
+    images: page.images,
+    rawDocumentWordCount: page.rawDocumentWordCount || page.rawWordCount,
+    visibleBodyWordCount: page.visibleBodyWordCount || page.wordCount,
+    mainContentWordCount: page.mainContentWordCount || page.wordCount,
+    landmarks: page.landmarks,
+    hasMainLandmark: page.landmarks.hasMain,
+    headingsOutline: page.headingsOutline,
+    renderReason: page.renderReason,
+    renderConfidence: page.renderConfidence,
+  };
 }
 
 /**
@@ -406,6 +461,9 @@ export interface CrawledPageData {
   rawFacts?: RawPageFacts;
   renderedFacts?: RenderedPageFacts;
   authoritativeFacts?: AuthoritativePageFacts;
+
+  // Render Decision Metadata
+  renderDecision?: RenderDecision;
 
   // Rendering & Completeness
   renderMode: RenderMode;
@@ -479,6 +537,11 @@ export interface DiagnosticEvidence {
   sourceUrl: string;
   targetUrl?: string | null;
   codeSnippet?: string | null;
+  factSource?: "raw_http" | "rendered_playwright" | "mixed" | "manual_review";
+  authoritativeFactSource?: "raw" | "rendered";
+  renderReason?: string;
+  renderConfidence?: RenderConfidence;
+  componentClassification?: "global_template" | "page_primary" | "unknown";
 }
 
 export interface DiagnosticIssue {

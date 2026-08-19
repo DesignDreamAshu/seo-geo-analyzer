@@ -1,4 +1,4 @@
-import type { BrowserPageState, BrowserVerificationCapability, DiagnosticIssue, ExternalLinkTelemetry } from "../types";
+import type { BrowserVerificationCapability, DiagnosticIssue, ExternalLinkTelemetry } from "../types";
 import type { VerificationGitState } from "./git-info";
 
 export interface VerificationEnvironment {
@@ -8,7 +8,11 @@ export interface VerificationEnvironment {
   platform: string;
   arch: string;
   osRelease: string;
-  playwrightVersion: string;
+  declaredPlaywrightVersion?: string;
+  lockfilePlaywrightVersion?: string;
+  runtimePlaywrightVersion: string;
+  playwrightVersionMatchesDeclared: boolean;
+  playwrightVersion: string; // compatibility alias
   isRender: boolean;
 }
 
@@ -40,6 +44,8 @@ export interface BrowserCapabilityArtifact {
   environment: VerificationEnvironment;
 }
 
+export type FieldQualityStatus = "PASS" | "PARTIAL" | "FAIL" | "NOT_EVALUATED";
+
 export interface FieldParityStat {
   field: string;
   category: "core_seo" | "structural_a11y" | "content_text";
@@ -51,6 +57,8 @@ export interface FieldParityStat {
   notEvaluated: number;
   strictParityPercent: number;
   comparableParityPercent: number;
+  fieldQualityStatus: FieldQualityStatus;
+  gateThresholdPercent: number;
 }
 
 export interface RuleAccuracyMetric {
@@ -61,6 +69,7 @@ export interface RuleAccuracyMetric {
   trueNegatives: number;
   falseNegatives: number;
   status: "MEASURED" | "NOT_EVALUATED";
+  notes?: string;
 }
 
 export interface ParityCategorySummary {
@@ -74,12 +83,11 @@ export interface ParityCategorySummary {
   comparableParityPercent: number;
   qualityGatePassed: boolean;
   qualityGateThresholdPercent: number;
+  mandatoryFieldsPassed: boolean;
 }
 
-export interface ParityArtifact {
-  verificationRunId: string;
-  gitShaFull: string;
-  generatedAt: string;
+export interface SingleParityPopulation {
+  populationName: "raw_extraction" | "production_authoritative";
   targetUrlsCount: number;
   totalFactsConsidered: number;
   exactMatches: number;
@@ -97,7 +105,6 @@ export interface ParityArtifact {
   };
   mismatchCategories: Record<string, number>;
   fieldMetrics: FieldParityStat[];
-  ruleMetrics: RuleAccuracyMetric[];
   urlSummaries: Array<{
     url: string;
     exact: number;
@@ -112,6 +119,41 @@ export interface ParityArtifact {
       mismatchReason?: string;
     }>;
   }>;
+}
+
+export interface RenderDecisionSample {
+  url: string;
+  classification: string;
+  rawH1: string | null;
+  rawVisibleWords: number;
+  rawMainWords: number;
+  formsCount: number;
+  renderEligible: boolean;
+  triggerReasons: string[];
+  attempted: boolean;
+  success?: boolean;
+  authoritativeSource: "raw" | "rendered";
+}
+
+export interface RenderTriggerAccuracyMetric {
+  targetUrlsCount: number;
+  truePositives: number;
+  trueNegatives: number;
+  falsePositives: number;
+  falseNegatives: number;
+  precisionPercent: number;
+  recallPercent: number;
+}
+
+export interface ParityArtifact {
+  verificationRunId: string;
+  gitShaFull: string;
+  generatedAt: string;
+  rawExtractionParity: SingleParityPopulation;
+  productionAuthoritativeParity: SingleParityPopulation;
+  renderTriggerAccuracy: RenderTriggerAccuracyMetric;
+  renderDecisionSamples: RenderDecisionSample[];
+  ruleMetrics: RuleAccuracyMetric[];
 }
 
 export interface DisputedUrlStabilityProbe {
@@ -129,6 +171,18 @@ export interface LegacyStabilityArtifact {
   probesCount: number;
   disputedUrlsCount: number;
   results: DisputedUrlStabilityProbe[];
+}
+
+export interface RenderingTelemetry {
+  htmlPagesEvaluated: number;
+  eligibleForRender: number;
+  notEligibleForRender: number;
+  actuallyRendered: number;
+  skippedEligible: number;
+  renderSuccess: number;
+  renderFailed: number;
+  authoritativeRenderedPagesCount: number;
+  telemetryInvariantValid: boolean;
 }
 
 export interface AuditArtifact {
@@ -151,13 +205,7 @@ export interface AuditArtifact {
     sitemapOrphanCount: number;
     crawlIsolatedCount: number;
   };
-  renderingTelemetry: {
-    eligibleForRender: number;
-    actuallyRendered: number;
-    renderSuccess: number;
-    renderFailed: number;
-    authoritativeRenderedPagesCount: number;
-  };
+  renderingTelemetry: RenderingTelemetry;
   severityCounts: {
     critical: number;
     warnings: number;
@@ -187,8 +235,20 @@ export interface ReleaseManifest {
   };
 }
 
+export type DeploymentStatusClassification =
+  | "PRODUCTION_VERIFIED"
+  | "DNS_UNRESOLVED"
+  | "CONNECTION_TIMEOUT"
+  | "SERVICE_UNAVAILABLE"
+  | "HTTP_ERROR"
+  | "HEALTH_ROUTE_MISSING"
+  | "SHA_MISMATCH"
+  | "BROWSER_UNAVAILABLE"
+  | "DEPLOYMENT_URL_NOT_CONFIGURED"
+  | "DEPLOYMENT_PENDING";
+
 export interface DeploymentVerificationArtifact {
-  deploymentUrl: string;
+  deploymentUrl: string | null;
   deployedGitSha: string | null;
   verifiedGitSha: string;
   shaMatch: boolean;
@@ -201,7 +261,17 @@ export interface DeploymentVerificationArtifact {
   browserLaunchSucceeded: boolean;
   navigationSmokeSucceeded: boolean;
   checkedAt: string;
-  deploymentStatus: "PRODUCTION_VERIFIED" | "PRODUCTION_DEGRADED" | "PRODUCTION_FAILED" | "DEPLOYMENT_PENDING";
+  deploymentStatus: DeploymentStatusClassification;
+  errorCode?: string;
+  errorMessage?: string;
+  httpStatus?: number | null;
+}
+
+export interface MultiDimensionalReleaseStatus {
+  buildVerificationStatus: "PASS" | "FAIL";
+  accuracyVerificationStatus: "PASS" | "NEEDS_REVIEW" | "FAIL";
+  localReleaseStatus: "VERIFIED_PASS" | "VERIFIED_WITH_WARNINGS" | "FAILED";
+  productionDeploymentStatus: DeploymentStatusClassification;
 }
 
 export interface ReleaseVerificationReport {
@@ -214,12 +284,14 @@ export interface ReleaseVerificationReport {
   remoteVerified: boolean;
   verificationGitState: VerificationGitState;
   generatedAt: string;
-  overallStatus: "VERIFIED_PASS" | "VERIFIED_WITH_WARNINGS" | "FAILED";
+  statuses: MultiDimensionalReleaseStatus;
+  overallStatus: "VERIFIED_PASS" | "VERIFIED_WITH_WARNINGS" | "FAILED"; // compatibility alias for localReleaseStatus
   summary: {
     buildStatus: "PASS" | "FAIL";
     browserCapability: BrowserVerificationCapability;
-    parityComparableRate: number;
-    parityStrictRate: number;
+    rawParityComparableRate: number;
+    productionParityComparableRate: number;
+    productionParityStrictRate: number;
     coreSeoParityPercent: number;
     structuralParityPercent: number;
     contentTextParityPercent: number;
@@ -228,6 +300,7 @@ export interface ReleaseVerificationReport {
     pagesCrawled: number;
     indexablePages: number;
     renderedPagesCount: number;
+    renderTriggerRecallPercent: number;
     terminationReason: string;
     totalIssues: number;
     criticalIssues: number;
@@ -240,6 +313,7 @@ export interface ReleaseVerificationReport {
     mismatchCategoriesSumValid: boolean;
     telemetryArithmeticValid: boolean;
     scoreDeductionsValid: boolean;
+    renderDecisionTelemetryValid: boolean;
   };
   provenance: {
     gitShaFull: string;
@@ -255,6 +329,7 @@ export interface ReleaseVerificationReport {
   environment: VerificationEnvironment;
   browserCapability: BrowserCapabilityArtifact;
   browserParity: ParityArtifact;
+  renderDecisionSamples: RenderDecisionSample[];
   ruleAccuracy: RuleAccuracyMetric[];
   legacyStability: LegacyStabilityArtifact;
   fullAudit: AuditArtifact;
