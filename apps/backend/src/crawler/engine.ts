@@ -12,6 +12,7 @@ import type {
   CrawledPageData,
   CrawlInventory,
   CrawlProgress,
+  CrawlTerminationReason,
 } from "./types";
 
 /**
@@ -85,11 +86,8 @@ export async function runSiteAuditCrawl(options: CrawlOptions): Promise<CrawlAud
   // 3. BFS Async Crawling Loop with Per-Page Resilience
   reportProgress({ status: "crawling", currentUrl: seedNormalized, percent: 10 });
 
-  let terminationReason = "queue empty";
-
   while (queue.length > 0 && crawledMap.size < maxPages) {
     if (options.signal?.aborted) {
-      terminationReason = "aborted by signal";
       break;
     }
 
@@ -182,6 +180,9 @@ export async function runSiteAuditCrawl(options: CrawlOptions): Promise<CrawlAud
             renderReason: "fetch_error",
             renderConfidence: "high",
             rawWordCount: 0,
+            rawDocumentWordCount: 0,
+            visibleBodyWordCount: 0,
+            mainContentWordCount: 0,
             renderedWordCount: 0,
             rawH1Count: 0,
             renderedH1Count: 0,
@@ -234,8 +235,11 @@ export async function runSiteAuditCrawl(options: CrawlOptions): Promise<CrawlAud
     );
   }
 
+  let terminationReason: CrawlTerminationReason = "queue_exhausted";
   if (crawledMap.size >= maxPages) {
-    terminationReason = `maxPages reached (${maxPages})`;
+    terminationReason = "max_pages_reached";
+  } else if (options.signal?.aborted) {
+    terminationReason = "cancelled";
   }
 
   const crawledPages = Array.from(crawledMap.values());
@@ -285,6 +289,7 @@ export async function runSiteAuditCrawl(options: CrawlOptions): Promise<CrawlAud
     startedAt: startedAt.toISOString(),
     completedAt: completedAt.toISOString(),
     durationMs: completedAt.getTime() - startedAt.getTime(),
+    terminationReason,
     healthScore: ruleResults.healthScore,
     auditCoveragePercent: ruleResults.auditCoveragePercent,
     scoreBreakdown: ruleResults.scoreBreakdown,

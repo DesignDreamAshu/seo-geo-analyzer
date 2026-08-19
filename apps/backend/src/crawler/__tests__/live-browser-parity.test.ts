@@ -1,5 +1,18 @@
+/**
+ * Independent Live Playwright Browser Parity Test Suite
+ * 
+ * Ground-Truth Principles:
+ * 1. Independent extraction: Zero reuse of parseHtmlPage() or crawler DOM helpers.
+ * 2. Native DOM queries: document.title, document.querySelectorAll(), document.querySelector().
+ * 3. Equivalent population word-count models (rawDocument, visibleBody, mainContent).
+ * 4. Rule-level False Positive / False Negative measurement on deterministic rules.
+ * 5. Machine-readable JSON output artifact with strict arithmetic invariant.
+ */
+
 import { chromium } from "playwright";
 import axios from "axios";
+import fs from "fs";
+import path from "path";
 import { parseHtmlPage } from "../parser";
 import { normalizeUrl } from "../normalizer";
 
@@ -15,6 +28,9 @@ interface CrawlerFactModel {
   h1Texts: string[];
   h2Count: number;
   h3Count: number;
+  rawDocumentWordCount: number;
+  visibleBodyWordCount: number;
+  mainContentWordCount: number;
   wordCount: number;
   hasMain: boolean;
   mainCount: number;
@@ -38,7 +54,10 @@ interface BrowserOracleFactModel {
   h1Texts: string[];
   h2Count: number;
   h3Count: number;
-  visibleWordCount: number;
+  rawDocumentWordCount: number;
+  visibleBodyWordCount: number;
+  mainContentWordCount: number;
+  wordCount: number;
   hasMain: boolean;
   mainCount: number;
   formCount: number;
@@ -68,13 +87,23 @@ const TEST_URLS = [
   "https://www.botconsulting.io/contact-us",
   "https://www.botconsulting.io/solution-service-now",
   "https://www.botconsulting.io/job-categories/customer-support",
+  "https://www.botconsulting.io/job-categories/sales-marketing",
   "https://www.botconsulting.io/job-openings/data-architect",
   "https://www.botconsulting.io/job-openings/analytic-engineer",
+  "https://www.botconsulting.io/jobopenings/790176000000574221",
+  "https://www.botconsulting.io/jobopenings/790176000000574233",
+  "https://www.botconsulting.io/jobopenings-copy/790176000000574229",
+  "https://www.botconsulting.io/jobopenings-copy/790176000000574249",
   "https://www.botconsulting.io/post/2025-year-in-review",
   "https://www.botconsulting.io/post/ar-bot-ai-powered-accounts-receivable-automation-on-servicenow",
+  "https://www.botconsulting.io/post/high-impact-gccs-the-new-growth-engine-for-global-enterprises",
   "https://www.botconsulting.io/search",
   "https://www.botconsulting.io/thank-you",
   "https://www.botconsulting.io/application",
+  "https://www.botconsulting.io/non-existent-page-404-test",
+  "https://www.botconsulting.io/sitemap.xml",
+  "https://www.botconsulting.io/cdn-cgi/l/email-protection",
+  "https://www.botconsulting.io/terms-of-service",
 ];
 
 async function extractCrawlerFacts(url: string): Promise<CrawlerFactModel> {
@@ -98,10 +127,12 @@ async function extractCrawlerFacts(url: string): Promise<CrawlerFactModel> {
     response.status,
     [],
     typeof response.data === "string" ? response.data : JSON.stringify(response.data),
-    (response.headers || {}) as any,
+    response.headers as any,
     150,
-    1,
-    "https://www.botconsulting.io"
+    0,
+    "https://www.botconsulting.io",
+    false,
+    false
   );
 
   return {
@@ -114,8 +145,11 @@ async function extractCrawlerFacts(url: string): Promise<CrawlerFactModel> {
     robots: parsed.metaRobots,
     h1Count: parsed.h1Count,
     h1Texts: parsed.h1s,
-    h2Count: parsed.headingsOutline.filter((h) => h.level === 2).length,
-    h3Count: parsed.headingsOutline.filter((h) => h.level === 3).length,
+    h2Count: parsed.h2Tags.length,
+    h3Count: parsed.h3Tags.length,
+    rawDocumentWordCount: parsed.rawDocumentWordCount,
+    visibleBodyWordCount: parsed.visibleBodyWordCount,
+    mainContentWordCount: parsed.mainContentWordCount,
     wordCount: parsed.wordCount,
     hasMain: parsed.landmarks.hasMain,
     mainCount: parsed.landmarks.mainCount,
@@ -177,11 +211,35 @@ async function extractPlaywrightOracleFacts(browser: any, url: string): Promise<
       const h2Count = document.querySelectorAll("h2").length;
       const h3Count = document.querySelectorAll("h3").length;
 
-      // Visible word count estimation
-      const clone = document.body.cloneNode(true) as HTMLElement;
-      clone.querySelectorAll("script, style, noscript, svg, nav, footer").forEach((el) => el.remove());
-      const visibleText = (clone.innerText || "").replace(/\s+/g, " ").trim();
-      const visibleWordCount = visibleText ? visibleText.split(/\s+/).length : 0;
+      // 1. Raw Document Word Count (stripping only script/style/svg)
+      const rawClone = document.body ? (document.body.cloneNode(true) as HTMLElement) : null;
+      let rawDocWords = 0;
+      if (rawClone) {
+        rawClone.querySelectorAll("script, style, noscript, svg").forEach((el) => el.remove());
+        const rawText = (rawClone.innerText || "").replace(/\s+/g, " ").trim();
+        rawDocWords = rawText ? rawText.split(/\s+/).filter(Boolean).length : 0;
+      }
+
+      // 2. Visible Body Word Count (stripping nav, footer, header)
+      const bodyClone = document.body ? (document.body.cloneNode(true) as HTMLElement) : null;
+      let visBodyWords = 0;
+      if (bodyClone) {
+        bodyClone.querySelectorAll("script, style, noscript, svg, nav, footer, header, [role='navigation'], [role='banner']").forEach((el) => el.remove());
+        const visText = (bodyClone.innerText || "").replace(/\s+/g, " ").trim();
+        visBodyWords = visText ? visText.split(/\s+/).filter(Boolean).length : 0;
+      }
+
+      // 3. Main Content Word Count
+      const mainEl = document.querySelector("main, [role='main'], #main-content, .main-content") as HTMLElement | null;
+      let mainWords = 0;
+      if (mainEl) {
+        const mainClone = mainEl.cloneNode(true) as HTMLElement;
+        mainClone.querySelectorAll("script, style, noscript, svg, nav, footer, header").forEach((el) => el.remove());
+        const mainText = (mainClone.innerText || "").replace(/\s+/g, " ").trim();
+        mainWords = mainText ? mainText.split(/\s+/).filter(Boolean).length : 0;
+      } else {
+        mainWords = visBodyWords;
+      }
 
       // Landmarks & semantic tags
       const mainNodes = document.querySelectorAll("main, [role='main']");
@@ -190,7 +248,9 @@ async function extractPlaywrightOracleFacts(browser: any, url: string): Promise<
 
       // Forms and unlabelled inputs
       const forms = document.querySelectorAll("form");
-      const inputs = document.querySelectorAll("input:not([type='hidden']):not([type='submit']):not([type='button']), textarea, select");
+      const inputs = document.querySelectorAll(
+        "input:not([type='hidden']):not([type='submit']):not([type='button']), textarea, select"
+      );
       let unlabelledCount = 0;
       inputs.forEach((input) => {
         const id = input.getAttribute("id");
@@ -202,41 +262,60 @@ async function extractPlaywrightOracleFacts(browser: any, url: string): Promise<
         }
       });
 
-      // Images and alt attributes
-      const images = Array.from(document.querySelectorAll("img"));
-      const imageCount = images.length;
-      let missingAltCount = 0;
-      images.forEach((img) => {
-        if (!img.hasAttribute("alt")) {
-          missingAltCount++;
-        }
-      });
+      // Images
+      const imgNodes = Array.from(document.querySelectorAll("img"));
+      const imageCount = imgNodes.length;
+      const missingAltCount = imgNodes.filter((img) => !img.hasAttribute("alt")).length;
 
-      const bodyTextLower = (document.body.innerText || "").toLowerCase();
-      const isChallenge =
-        bodyTextLower.includes("cloudflare") &&
-        (bodyTextLower.includes("verify you are human") || bodyTextLower.includes("turnstile"));
+      // Challenge detection
+      const bodySnippet = (document.body?.innerText || "").slice(0, 1000).toLowerCase();
+      const challengeDetected =
+        bodySnippet.includes("cloudflare") &&
+        (bodySnippet.includes("verify you are human") || bodySnippet.includes("turnstile"));
 
       return {
-        title: docTitle,
-        metaDescription: metaDesc,
-        canonical: canonicalTag,
-        robots: robotsMeta,
+        docTitle,
+        metaDesc,
+        canonicalTag,
+        robotsMeta,
         h1Count: h1Nodes.length,
         h1Texts,
         h2Count,
         h3Count,
-        visibleWordCount,
+        rawDocumentWordCount: rawDocWords,
+        visibleBodyWordCount: visBodyWords,
+        mainContentWordCount: mainWords,
+        wordCount: mainWords > 0 ? mainWords : visBodyWords,
         hasMain,
         mainCount,
         formCount: forms.length,
         unlabelledFormControlCount: unlabelledCount,
         imageCount,
         missingAltCount,
-        challengeDetected: isChallenge,
+        challengeDetected,
       };
     })
-    .catch(() => null);
+    .catch((err) => ({
+      docTitle: null,
+      metaDesc: null,
+      canonicalTag: null,
+      robotsMeta: null,
+      h1Count: 0,
+      h1Texts: [],
+      h2Count: 0,
+      h3Count: 0,
+      rawDocumentWordCount: 0,
+      visibleBodyWordCount: 0,
+      mainContentWordCount: 0,
+      wordCount: 0,
+      hasMain: false,
+      mainCount: 0,
+      formCount: 0,
+      unlabelledFormControlCount: 0,
+      imageCount: 0,
+      missingAltCount: 0,
+      challengeDetected: false,
+    }));
 
   await context.close();
 
@@ -244,267 +323,348 @@ async function extractPlaywrightOracleFacts(browser: any, url: string): Promise<
     requestedUrl: url,
     navigationStatus,
     finalUrl,
-    title: domData?.title ?? null,
-    metaDescription: domData?.metaDescription ?? null,
-    canonical: domData?.canonical ?? null,
-    robots: domData?.robots ?? null,
-    h1Count: domData?.h1Count ?? 0,
-    h1Texts: domData?.h1Texts ?? [],
-    h2Count: domData?.h2Count ?? 0,
-    h3Count: domData?.h3Count ?? 0,
-    visibleWordCount: domData?.visibleWordCount ?? 0,
-    hasMain: domData?.hasMain ?? false,
-    mainCount: domData?.mainCount ?? 0,
-    formCount: domData?.formCount ?? 0,
-    unlabelledFormControlCount: domData?.unlabelledFormControlCount ?? 0,
-    imageCount: domData?.imageCount ?? 0,
-    missingAltCount: domData?.missingAltCount ?? 0,
+    title: domData.docTitle,
+    metaDescription: domData.metaDesc,
+    canonical: domData.canonicalTag,
+    robots: domData.robotsMeta,
+    h1Count: domData.h1Count,
+    h1Texts: domData.h1Texts,
+    h2Count: domData.h2Count,
+    h3Count: domData.h3Count,
+    rawDocumentWordCount: domData.rawDocumentWordCount,
+    visibleBodyWordCount: domData.visibleBodyWordCount,
+    mainContentWordCount: domData.mainContentWordCount,
+    wordCount: domData.wordCount,
+    hasMain: domData.hasMain,
+    mainCount: domData.mainCount,
+    formCount: domData.formCount,
+    unlabelledFormControlCount: domData.unlabelledFormControlCount,
+    imageCount: domData.imageCount,
+    missingAltCount: domData.missingAltCount,
     domContentLoaded,
     networkIdleReached,
-    challengeDetected: domData?.challengeDetected ?? false,
+    challengeDetected: domData.challengeDetected,
     browserError,
   };
 }
 
-function compareFacts(crawler: CrawlerFactModel, oracle: BrowserOracleFactModel): FactComparison[] {
+function compareFacts(crawler: CrawlerFactModel, browser: BrowserOracleFactModel): FactComparison[] {
   const comparisons: FactComparison[] = [];
 
-  // 1. Status
+  // 1. Status Code
   comparisons.push({
-    field: "HTTP / Navigation Status",
+    field: "status_code",
     crawlerValue: crawler.status,
-    browserValue: oracle.navigationStatus,
-    status: crawler.status === oracle.navigationStatus ? "EXACT_MATCH" : "MISMATCH",
+    browserValue: browser.navigationStatus,
+    status: crawler.status === browser.navigationStatus ? "EXACT_MATCH" : "MISMATCH",
   });
 
   // 2. Title
-  const cleanCrawlerTitle = (crawler.title || "").trim().toLowerCase();
-  const cleanOracleTitle = (oracle.title || "").trim().toLowerCase();
-  if (cleanCrawlerTitle === cleanOracleTitle) {
-    comparisons.push({
-      field: "Document Title",
-      crawlerValue: crawler.title,
-      browserValue: oracle.title,
-      status: "EXACT_MATCH",
-    });
-  } else if (cleanCrawlerTitle.includes(cleanOracleTitle) || cleanOracleTitle.includes(cleanCrawlerTitle)) {
-    comparisons.push({
-      field: "Document Title",
-      crawlerValue: crawler.title,
-      browserValue: oracle.title,
-      status: "TOLERATED_MATCH",
-      note: "Substring / formatting match",
-    });
-  } else {
-    comparisons.push({
-      field: "Document Title",
-      crawlerValue: crawler.title,
-      browserValue: oracle.title,
-      status: "MISMATCH",
-    });
-  }
+  comparisons.push({
+    field: "title",
+    crawlerValue: crawler.title,
+    browserValue: browser.title,
+    status: crawler.title === browser.title ? "EXACT_MATCH" : "MISMATCH",
+  });
 
   // 3. Meta Description
   comparisons.push({
-    field: "Meta Description",
+    field: "meta_description",
     crawlerValue: crawler.metaDescription,
-    browserValue: oracle.metaDescription,
-    status:
-      (crawler.metaDescription || "").trim() === (oracle.metaDescription || "").trim()
-        ? "EXACT_MATCH"
-        : "MISMATCH",
+    browserValue: browser.metaDescription,
+    status: crawler.metaDescription === browser.metaDescription ? "EXACT_MATCH" : "MISMATCH",
   });
 
-  // 4. Canonical
+  // 4. Canonical URL
+  const cCanon = crawler.canonical?.replace(/\/$/, "") || null;
+  const bCanon = browser.canonical?.replace(/\/$/, "") || null;
   comparisons.push({
-    field: "Canonical URL",
+    field: "canonical_url",
     crawlerValue: crawler.canonical,
-    browserValue: oracle.canonical,
+    browserValue: browser.canonical,
     status:
-      (crawler.canonical || "").trim() === (oracle.canonical || "").trim()
+      crawler.canonical === browser.canonical
         ? "EXACT_MATCH"
+        : cCanon === bCanon
+        ? "TOLERATED_MATCH"
         : "MISMATCH",
   });
 
   // 5. H1 Count
   comparisons.push({
-    field: "H1 Tag Count",
+    field: "h1_count",
     crawlerValue: crawler.h1Count,
-    browserValue: oracle.h1Count,
-    status: crawler.h1Count === oracle.h1Count ? "EXACT_MATCH" : "MISMATCH",
+    browserValue: browser.h1Count,
+    status: crawler.h1Count === browser.h1Count ? "EXACT_MATCH" : "MISMATCH",
   });
 
-  // 6. H1 Primary Text
-  const crawlerH1 = (crawler.h1Texts[0] || "").trim().toLowerCase();
-  const oracleH1 = (oracle.h1Texts[0] || "").trim().toLowerCase();
-  if (crawlerH1 === oracleH1) {
-    comparisons.push({
-      field: "Primary H1 Text",
-      crawlerValue: crawler.h1Texts[0] || "[None]",
-      browserValue: oracle.h1Texts[0] || "[None]",
-      status: "EXACT_MATCH",
-    });
-  } else if (crawlerH1.replace(/\s+/g, "") === oracleH1.replace(/\s+/g, "")) {
-    comparisons.push({
-      field: "Primary H1 Text",
-      crawlerValue: crawler.h1Texts[0] || "[None]",
-      browserValue: oracle.h1Texts[0] || "[None]",
-      status: "TOLERATED_MATCH",
-      note: "Whitespace / line-break variation",
-    });
-  } else {
-    comparisons.push({
-      field: "Primary H1 Text",
-      crawlerValue: crawler.h1Texts[0] || "[None]",
-      browserValue: oracle.h1Texts[0] || "[None]",
-      status: "MISMATCH",
-    });
-  }
-
-  // 7. Main Semantic Landmark
+  // 6. Primary H1 Text
+  const cH1 = crawler.h1Texts[0] || null;
+  const bH1 = browser.h1Texts[0] || null;
   comparisons.push({
-    field: "<main> Semantic Landmark",
-    crawlerValue: crawler.hasMain,
-    browserValue: oracle.hasMain,
-    status: crawler.hasMain === oracle.hasMain ? "EXACT_MATCH" : "MISMATCH",
+    field: "primary_h1_text",
+    crawlerValue: cH1,
+    browserValue: bH1,
+    status: cH1 === bH1 ? "EXACT_MATCH" : "MISMATCH",
   });
 
-  // 8. Word Count / Visible Content
-  const wordDiffRatio = Math.abs(crawler.wordCount - oracle.visibleWordCount) / Math.max(1, oracle.visibleWordCount);
-  if (wordDiffRatio < 0.25 || Math.abs(crawler.wordCount - oracle.visibleWordCount) < 30) {
-    comparisons.push({
-      field: "Word Count",
-      crawlerValue: crawler.wordCount,
-      browserValue: oracle.visibleWordCount,
-      status: "TOLERATED_MATCH",
-      note: `Within acceptable tolerance (${Math.round(wordDiffRatio * 100)}% variance)`,
-    });
-  } else {
-    comparisons.push({
-      field: "Word Count",
-      crawlerValue: crawler.wordCount,
-      browserValue: oracle.visibleWordCount,
-      status: "MISMATCH",
-      note: `Variance ${Math.round(wordDiffRatio * 100)}% exceeds 25% tolerance`,
-    });
-  }
+  // 7. Visible Body Word Count (with 20% tolerance for client template hydration)
+  const cWords = crawler.visibleBodyWordCount || crawler.wordCount;
+  const bWords = browser.visibleBodyWordCount || browser.wordCount;
+  const wordDiff = Math.abs(cWords - bWords);
+  const maxWords = Math.max(1, cWords, bWords);
+  const wordDiffPct = wordDiff / maxWords;
+
+  comparisons.push({
+    field: "visible_body_word_count",
+    crawlerValue: cWords,
+    browserValue: bWords,
+    status:
+      cWords === bWords
+        ? "EXACT_MATCH"
+        : wordDiffPct <= 0.2
+        ? "TOLERATED_MATCH"
+        : "MISMATCH",
+    note: `Diff: ${wordDiff} words (${(wordDiffPct * 100).toFixed(1)}%)`,
+  });
+
+  // 8. Main Landmark Presence
+  comparisons.push({
+    field: "has_main_landmark",
+    crawlerValue: crawler.hasMain,
+    browserValue: browser.hasMain,
+    status: crawler.hasMain === browser.hasMain ? "EXACT_MATCH" : "MISMATCH",
+  });
 
   // 9. Forms Count
   comparisons.push({
-    field: "Forms Count",
+    field: "form_count",
     crawlerValue: crawler.formCount,
-    browserValue: oracle.formCount,
-    status: crawler.formCount === oracle.formCount ? "EXACT_MATCH" : "MISMATCH",
+    browserValue: browser.formCount,
+    status: crawler.formCount === browser.formCount ? "EXACT_MATCH" : "MISMATCH",
+    note:
+      crawler.formCount !== browser.formCount
+        ? "Client JS dynamic form injection in browser"
+        : undefined,
   });
 
-  // 10. Missing Alt Count
+  // 10. Missing Image Alt Count
   comparisons.push({
-    field: "Images Missing Alt Count",
+    field: "missing_alt_count",
     crawlerValue: crawler.missingAltCount,
-    browserValue: oracle.missingAltCount,
-    status: crawler.missingAltCount === oracle.missingAltCount ? "EXACT_MATCH" : "MISMATCH",
+    browserValue: browser.missingAltCount,
+    status: crawler.missingAltCount === browser.missingAltCount ? "EXACT_MATCH" : "MISMATCH",
   });
 
   return comparisons;
 }
 
+interface RuleAccuracyMetric {
+  ruleCode: string;
+  totalEvaluatedPages: number;
+  truePositives: number;
+  falsePositives: number;
+  trueNegatives: number;
+  falseNegatives: number;
+  status: "MEASURED" | "NOT_EVALUATED";
+}
+
 async function runLiveBrowserParity() {
-  console.log("==========================================================================");
-  console.log("   INDEPENDENT LIVE PLAYWRIGHT BROWSER PARITY HARNESS");
-  console.log("   (Comparing Dream SEO Crawler Model against Independent Playwright Oracle)");
-  console.log("==========================================================================\n");
+  const startedAt = new Date().toISOString();
+  console.log("=======================================================");
+  console.log("   INDEPENDENT LIVE PLAYWRIGHT BROWSER PARITY SUITE    ");
+  console.log(`   Evaluating ${TEST_URLS.length} Representative Live URLs`);
+  console.log("=======================================================\n");
 
   const browser = await chromium.launch({
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });
 
-  let totalComparableFacts = 0;
-  let exactMatches = 0;
-  let toleratedMatches = 0;
-  let mismatches = 0;
-  let inconclusiveCount = 0;
-  const mismatchList: Array<{ url: string; field: string; crawler: any; browser: any; note?: string }> = [];
+  let totalExact = 0;
+  let totalTolerated = 0;
+  let totalMismatch = 0;
+  let totalInconclusive = 0;
+  let totalNotEvaluated = 0;
+  let totalFactsConsidered = 0;
+
+  const urlSummaries: any[] = [];
+
+  // Deterministic rule tracking
+  let missingH1_FP = 0, missingH1_FN = 0, missingH1_TP = 0, missingH1_TN = 0;
+  let multipleH1_FP = 0, multipleH1_FN = 0, multipleH1_TP = 0, multipleH1_TN = 0;
+  let missingMain_FP = 0, missingMain_FN = 0, missingMain_TP = 0, missingMain_TN = 0;
+  let missingTitle_FP = 0, missingTitle_FN = 0, missingTitle_TP = 0, missingTitle_TN = 0;
 
   for (const url of TEST_URLS) {
-    console.log(`\nURL: ${url}`);
-    console.log("--------------------------------------------------------------------------");
-
+    process.stdout.write(`Evaluating [${url.slice(0, 60)}] ... `);
     try {
-      const [crawlerFacts, oracleFacts] = await Promise.all([
+      const [crawlerFacts, browserFacts] = await Promise.all([
         extractCrawlerFacts(url),
         extractPlaywrightOracleFacts(browser, url),
       ]);
 
-      console.log(`RAW HTTP / CRAWLER`);
-      console.log(`  Status: ${crawlerFacts.status} | Final URL: ${crawlerFacts.finalUrl}`);
-      console.log(`  Title: "${crawlerFacts.title?.slice(0, 50)}..."`);
-      console.log(`  H1: count=${crawlerFacts.h1Count} ("${crawlerFacts.h1Texts[0] || ""}") | Words: ${crawlerFacts.wordCount}`);
-      console.log(`  Landmark <main>: ${crawlerFacts.hasMain} | RenderMode: ${crawlerFacts.renderMode} (${crawlerFacts.renderConfidence})`);
+      const comparisons = compareFacts(crawlerFacts, browserFacts);
 
-      console.log(`\nPLAYWRIGHT BROWSER ORACLE`);
-      console.log(`  Nav Status: ${oracleFacts.navigationStatus} | Final URL: ${oracleFacts.finalUrl}`);
-      console.log(`  Title: "${oracleFacts.title?.slice(0, 50)}..."`);
-      console.log(`  H1: count=${oracleFacts.h1Count} ("${oracleFacts.h1Texts[0] || ""}") | Visible Words: ${oracleFacts.visibleWordCount}`);
-      console.log(`  Landmark <main>: ${oracleFacts.hasMain} | DOMContentLoaded: ${oracleFacts.domContentLoaded} | NetworkIdle: ${oracleFacts.networkIdleReached}`);
-
-      const comparisons = compareFacts(crawlerFacts, oracleFacts);
-      console.log(`\nPARITY VERIFICATION:`);
+      let urlExact = 0;
+      let urlTolerated = 0;
+      let urlMismatch = 0;
 
       for (const comp of comparisons) {
-        totalComparableFacts++;
+        totalFactsConsidered++;
         if (comp.status === "EXACT_MATCH") {
-          exactMatches++;
-          console.log(`  [EXACT MATCH]      ${comp.field}: "${comp.crawlerValue}" === "${comp.browserValue}"`);
+          totalExact++;
+          urlExact++;
         } else if (comp.status === "TOLERATED_MATCH") {
-          toleratedMatches++;
-          console.log(`  [TOLERATED MATCH]  ${comp.field}: "${comp.crawlerValue}" ~ "${comp.browserValue}" (${comp.note || "Tolerated"})`);
+          totalTolerated++;
+          urlTolerated++;
+        } else if (comp.status === "MISMATCH") {
+          totalMismatch++;
+          urlMismatch++;
         } else if (comp.status === "INCONCLUSIVE") {
-          inconclusiveCount++;
-          console.log(`  [INCONCLUSIVE]     ${comp.field}: ${comp.note}`);
+          totalInconclusive++;
         } else {
-          mismatches++;
-          mismatchList.push({
-            url,
-            field: comp.field,
-            crawler: comp.crawlerValue,
-            browser: comp.browserValue,
-            note: comp.note,
-          });
-          console.log(`  [MISMATCH]         ${comp.field}: Crawler="${comp.crawlerValue}" vs Browser="${comp.browserValue}"`);
+          totalNotEvaluated++;
         }
       }
+
+      // Track Rule Ground Truth Parity
+      // 1. Missing H1
+      const cMissingH1 = crawlerFacts.h1Count === 0;
+      const bMissingH1 = browserFacts.h1Count === 0;
+      if (cMissingH1 && bMissingH1) missingH1_TP++;
+      else if (!cMissingH1 && !bMissingH1) missingH1_TN++;
+      else if (cMissingH1 && !bMissingH1) missingH1_FP++;
+      else if (!cMissingH1 && bMissingH1) missingH1_FN++;
+
+      // 2. Multiple H1
+      const cMultipleH1 = crawlerFacts.h1Count > 1;
+      const bMultipleH1 = browserFacts.h1Count > 1;
+      if (cMultipleH1 && bMultipleH1) multipleH1_TP++;
+      else if (!cMultipleH1 && !bMultipleH1) multipleH1_TN++;
+      else if (cMultipleH1 && !bMultipleH1) multipleH1_FP++;
+      else if (!cMultipleH1 && bMultipleH1) multipleH1_FN++;
+
+      // 3. Missing Main Landmark
+      const cMissingMain = !crawlerFacts.hasMain;
+      const bMissingMain = !browserFacts.hasMain;
+      if (cMissingMain && bMissingMain) missingMain_TP++;
+      else if (!cMissingMain && !bMissingMain) missingMain_TN++;
+      else if (cMissingMain && !bMissingMain) missingMain_FP++;
+      else if (!cMissingMain && bMissingMain) missingMain_FN++;
+
+      // 4. Missing Title
+      const cMissingTitle = !crawlerFacts.title;
+      const bMissingTitle = !browserFacts.title;
+      if (cMissingTitle && bMissingTitle) missingTitle_TP++;
+      else if (!cMissingTitle && !bMissingTitle) missingTitle_TN++;
+      else if (cMissingTitle && !bMissingTitle) missingTitle_FP++;
+      else if (!cMissingTitle && bMissingTitle) missingTitle_FN++;
+
+      console.log(`[${urlExact} Exact, ${urlTolerated} Tol, ${urlMismatch} Mismatch]`);
+      urlSummaries.push({
+        url,
+        exact: urlExact,
+        tolerated: urlTolerated,
+        mismatch: urlMismatch,
+        comparisons,
+      });
     } catch (err: any) {
-      console.log(`  [EXECUTION ERROR] ${err.message}`);
+      console.log(`[ERROR: ${err.message}]`);
     }
   }
 
   await browser.close();
+  const finishedAt = new Date().toISOString();
 
-  const strictParity = Math.round((exactMatches / Math.max(1, totalComparableFacts)) * 1000) / 10;
-  const comparableParity = Math.round(((exactMatches + toleratedMatches) / Math.max(1, totalComparableFacts)) * 1000) / 10;
-
-  console.log("\n==========================================================================");
-  console.log("   INDEPENDENT BROWSER PARITY HARNESS RESULTS");
-  console.log("==========================================================================");
-  console.log(`Total URLs Tested: ${TEST_URLS.length}`);
-  console.log(`Total Comparable Facts: ${totalComparableFacts}`);
-  console.log(`Exact Matches: ${exactMatches}`);
-  console.log(`Tolerated Matches: ${toleratedMatches}`);
-  console.log(`Mismatches: ${mismatches}`);
-  console.log(`Inconclusive Facts: ${inconclusiveCount}`);
-  console.log(`False Positives: 0`);
-  console.log(`False Negatives: 0`);
-  console.log(`Strict Parity Rate (Exact Only): ${strictParity}%`);
-  console.log(`Comparable Parity Rate (Exact + Tolerated): ${comparableParity}%\n`);
-
-  if (mismatchList.length > 0) {
-    console.log("Mismatched Fields Detail:");
-    mismatchList.forEach((m, idx) => {
-      console.log(`  ${idx + 1}. [${m.field}] on ${m.url}: Crawler=${JSON.stringify(m.crawler)} vs Browser=${JSON.stringify(m.browser)} ${m.note ? `(${m.note})` : ""}`);
-    });
-    console.log("");
+  // Strict arithmetic invariant verification
+  const sumOfParts = totalExact + totalTolerated + totalMismatch + totalInconclusive + totalNotEvaluated;
+  if (sumOfParts !== totalFactsConsidered) {
+    throw new Error(
+      `PARITY ARITHMETIC INVARIANT VIOLATION: sum(${sumOfParts}) !== totalConsidered(${totalFactsConsidered})`
+    );
   }
+
+  const strictParity = (totalExact / totalFactsConsidered) * 100;
+  const comparableParity = ((totalExact + totalTolerated) / totalFactsConsidered) * 100;
+
+  const ruleMetrics: RuleAccuracyMetric[] = [
+    {
+      ruleCode: "CONTENT_MISSING_H1",
+      totalEvaluatedPages: TEST_URLS.length,
+      truePositives: missingH1_TP,
+      falsePositives: missingH1_FP,
+      trueNegatives: missingH1_TN,
+      falseNegatives: missingH1_FN,
+      status: "MEASURED",
+    },
+    {
+      ruleCode: "CONTENT_MULTIPLE_H1",
+      totalEvaluatedPages: TEST_URLS.length,
+      truePositives: multipleH1_TP,
+      falsePositives: multipleH1_FP,
+      trueNegatives: multipleH1_TN,
+      falseNegatives: multipleH1_FN,
+      status: "MEASURED",
+    },
+    {
+      ruleCode: "A11Y_MISSING_MAIN_LANDMARK",
+      totalEvaluatedPages: TEST_URLS.length,
+      truePositives: missingMain_TP,
+      falsePositives: missingMain_FP,
+      trueNegatives: missingMain_TN,
+      falseNegatives: missingMain_FN,
+      status: "MEASURED",
+    },
+    {
+      ruleCode: "CONTENT_MISSING_TITLE",
+      totalEvaluatedPages: TEST_URLS.length,
+      truePositives: missingTitle_TP,
+      falsePositives: missingTitle_FP,
+      trueNegatives: missingTitle_TN,
+      falseNegatives: missingTitle_FN,
+      status: "MEASURED",
+    },
+  ];
+
+  const resultArtifact = {
+    runId: `run-${Date.now()}`,
+    gitSha: "63731e1",
+    startedAt,
+    finishedAt,
+    command: "npx tsx apps/backend/src/crawler/__tests__/live-browser-parity.test.ts",
+    urlCount: TEST_URLS.length,
+    totalFactsConsidered,
+    exactMatches: totalExact,
+    toleratedMatches: totalTolerated,
+    mismatches: totalMismatch,
+    inconclusive: totalInconclusive,
+    notEvaluated: totalNotEvaluated,
+    strictParity: Number(strictParity.toFixed(1)),
+    comparableParity: Number(comparableParity.toFixed(1)),
+    ruleMetrics,
+    urlSummaries,
+  };
+
+  const artifactPath = path.join(__dirname, "live-browser-parity-results.json");
+  fs.writeFileSync(artifactPath, JSON.stringify(resultArtifact, null, 2), "utf8");
+
+  console.log("\n=======================================================");
+  console.log("   INDEPENDENT BROWSER PARITY HARNESS SUMMARY");
+  console.log("=======================================================");
+  console.log(`Total URLs Tested: ${TEST_URLS.length}`);
+  console.log(`Total Facts Considered: ${totalFactsConsidered}`);
+  console.log(`Exact Matches: ${totalExact}`);
+  console.log(`Tolerated Matches: ${totalTolerated}`);
+  console.log(`Mismatches: ${totalMismatch}`);
+  console.log(`Inconclusive: ${totalInconclusive}`);
+  console.log(`Not Evaluated: ${totalNotEvaluated}`);
+  console.log(`Strict Parity: ${strictParity.toFixed(1)}%`);
+  console.log(`Comparable Parity: ${comparableParity.toFixed(1)}%`);
+  console.log(`Artifact saved to: ${artifactPath}`);
 }
 
-runLiveBrowserParity().catch(console.error);
+runLiveBrowserParity().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

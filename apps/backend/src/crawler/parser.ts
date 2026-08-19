@@ -162,19 +162,62 @@ export function extractForms($: cheerio.CheerioAPI): FormFact[] {
   return forms;
 }
 
-/**
- * Extracts clean main body text, ignoring boilerplate navigation, footers, scripts, and styles.
- */
-export function extractMainText($: cheerio.CheerioAPI): { text: string; wordCount: number } {
-  const clone = $.load($.html());
-  clone("script, style, noscript, svg, nav, footer, header, [role='navigation'], [role='banner'], .cookie-banner, #cookie-notice, .modal, .popup").remove();
+export interface WordCountBreakdown {
+  rawDocumentText: string;
+  rawDocumentWordCount: number;
+  visibleBodyText: string;
+  visibleBodyWordCount: number;
+  mainContentText: string;
+  mainContentWordCount: number;
+  wordCount: number;
+}
 
-  const rawText = clone("body").text().replace(/\s+/g, " ").trim();
-  const words = rawText.split(/\s+/).filter(Boolean);
+/**
+ * Extracts clean text populations: raw document, visible body (excluding chrome), and main content container.
+ */
+export function extractDetailedWordCounts($: cheerio.CheerioAPI): WordCountBreakdown {
+  // 1. Raw Document Text (stripping only non-content machine tags)
+  const rawClone = $.load($.html());
+  rawClone("script, style, noscript, svg").remove();
+  const rawDocText = rawClone("body").text().replace(/\s+/g, " ").trim();
+  const rawDocWords = rawDocText ? rawDocText.split(/\s+/).filter(Boolean).length : 0;
+
+  // 2. Visible Body Text (stripping nav, footer, header chrome)
+  const bodyClone = $.load($.html());
+  bodyClone("script, style, noscript, svg, nav, footer, header, [role='navigation'], [role='banner'], .cookie-banner, #cookie-notice, .modal, .popup").remove();
+  const visBodyText = bodyClone("body").text().replace(/\s+/g, " ").trim();
+  const visBodyWords = visBodyText ? visBodyText.split(/\s+/).filter(Boolean).length : 0;
+
+  // 3. Main Content Text (focusing on <main> or [role='main'] or #main-content)
+  let mainText = "";
+  let mainWords = 0;
+  const mainEl = $("main, [role='main'], #main-content, .main-content");
+  if (mainEl.length > 0) {
+    const mainClone = $.load(mainEl.first().html() || "");
+    mainClone("script, style, noscript, svg, nav, footer, header").remove();
+    mainText = mainClone.text().replace(/\s+/g, " ").trim();
+    mainWords = mainText ? mainText.split(/\s+/).filter(Boolean).length : 0;
+  } else {
+    mainText = visBodyText;
+    mainWords = visBodyWords;
+  }
 
   return {
-    text: rawText,
-    wordCount: words.length,
+    rawDocumentText: rawDocText,
+    rawDocumentWordCount: rawDocWords,
+    visibleBodyText: visBodyText,
+    visibleBodyWordCount: visBodyWords,
+    mainContentText: mainText,
+    mainContentWordCount: mainWords,
+    wordCount: mainWords > 0 ? mainWords : visBodyWords,
+  };
+}
+
+export function extractMainText($: cheerio.CheerioAPI): { text: string; wordCount: number } {
+  const res = extractDetailedWordCounts($);
+  return {
+    text: res.visibleBodyText,
+    wordCount: res.wordCount,
   };
 }
 
@@ -415,8 +458,14 @@ export function parseHtmlPage(
   const h2Tags = headingResult.outline.filter((h) => h.level === 2).map((h) => h.text);
   const h3Tags = headingResult.outline.filter((h) => h.level === 3).map((h) => h.text);
 
-  // Content Word Count & Ratio
-  const { text: mainText, wordCount } = extractMainText($);
+  // Content Word Counts (Raw Document, Visible Body, Main Content)
+  const wordBreakdown = extractDetailedWordCounts($);
+  const rawDocumentWordCount = wordBreakdown.rawDocumentWordCount;
+  const visibleBodyWordCount = wordBreakdown.visibleBodyWordCount;
+  const mainContentWordCount = wordBreakdown.mainContentWordCount;
+  const wordCount = wordBreakdown.wordCount;
+  const mainText = wordBreakdown.visibleBodyText;
+
   const htmlByteLength = Buffer.byteLength(html, "utf8");
   const textByteLength = Buffer.byteLength(mainText, "utf8");
   const textToHtmlRatio = htmlByteLength > 0 ? (textByteLength / htmlByteLength) * 100 : 0;
@@ -702,7 +751,10 @@ export function parseHtmlPage(
     renderMode,
     renderReason,
     renderConfidence,
-    rawWordCount: wordCount,
+    rawWordCount: rawDocumentWordCount,
+    rawDocumentWordCount,
+    visibleBodyWordCount,
+    mainContentWordCount,
     renderedWordCount,
     rawH1Count: headingResult.h1s.length,
     renderedH1Count,

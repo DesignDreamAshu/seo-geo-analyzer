@@ -1,6 +1,8 @@
 import axios, { AxiosResponse } from "axios";
-import { chromium } from "playwright";
+import { chromium, type Browser } from "playwright";
 import type {
+  BrowserPageState,
+  BrowserVerificationCapability,
   ExternalLinkBrowserEvidence,
   ExternalLinkEvidence,
   ExternalLinkHttpEvidence,
@@ -97,20 +99,199 @@ export async function fetchPageHtml(
 }
 
 /**
- * Runs a real Playwright headless Chromium browser session to verify whether a URL
- * actually loads or is genuinely broken/soft-404 in a full browser environment.
+ * Shared Bounded Playwright Browser Pool
+ * Prevents spawning dozens of heavy Chromium processes during audit crawls.
+ */
+class PlaywrightBrowserPool {
+  private browserInstance: Browser | null = null;
+  private isLaunching = false;
+
+  async getBrowser(): Promise<Browser | null> {
+    if (this.browserInstance && this.browserInstance.isConnected()) {
+      return this.browserInstance;
+    }
+    if (this.isLaunching) {
+      while (this.isLaunching) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      if (this.browserInstance && this.browserInstance.isConnected()) {
+        return this.browserInstance;
+      }
+    }
+
+    this.isLaunching = true;
+    try {
+      this.browserInstance = await chromium.launch({
+        headless: true,
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-gpu",
+          "--single-process",
+        ],
+      });
+      return this.browserInstance;
+    } catch (err: any) {
+      console.warn(`[BrowserPool] Failed to launch Chromium: ${err.message}`);
+      return null;
+    } finally {
+      this.isLaunching = false;
+    }
+  }
+
+  async close(): Promise<void> {
+    if (this.browserInstance) {
+      await this.browserInstance.close().catch(() => {});
+      this.browserInstance = null;
+    }
+  }
+}
+
+export const sharedBrowserPool = new PlaywrightBrowserPool();
+
+/**
+ * Self-check diagnostic for browser verification capability.
+ */
+export async function checkBrowserCapability(): Promise<{
+  capability: BrowserVerificationCapability;
+  details: string;
+}> {
+  try {
+    const browser = await sharedBrowserPool.getBrowser();
+    if (!browser) {
+      return {
+        capability: "unavailable",
+        details: "Playwright Chromium executable failed to launch",
+      };
+    }
+    const page = await browser.newPage();
+    await page.setContent("<html><body><p>Capability Test</p></body></html>");
+    const text = await page.textContent("p");
+    await page.close();
+
+    if (text === "Capability Test") {
+      return {
+        capability: "available",
+        details: "Playwright Chromium operational and verified",
+      };
+    }
+    return {
+      capability: "degraded",
+      details: "Browser initialized but evaluation returned unexpected result",
+    };
+  } catch (err: any) {
+    return {
+      capability: "unavailable",
+      details: `Browser initialization failed: ${err.message}`,
+    };
+  }
+}
+
+/**
+ * Generic Page State Classifier for rendered browser environments.
+ * Evaluates navigation status, text volume, challenge markers, and 404 patterns WITHOUT site-specific hardcoding.
+ */
+export function classifyBrowserPageState(
+  navStatus: number | null,
+  pageTitle: string,
+  bodyText: string,
+  headings: string[] = [],
+): { pageState: BrowserPageState; isChallenge: boolean } {
+  const combined = (pageTitle + " " + bodyText + " " + headings.join(" ")).toLowerCase();
+  const titleLower = pageTitle.toLowerCase();
+  const wordCount = bodyText.trim().split(/\s+/).filter(Boolean).length;
+
+  // 1. Generic Bot Challenge / CAPTCHA / WAF Protection
+  const isChallenge =
+    (combined.includes("cloudflare") &&
+      (combined.includes("verify you are human") ||
+        combined.includes("turnstile") ||
+        combined.includes("just a moment"))) ||
+    combined.includes("access denied") ||
+    combined.includes("attention required") ||
+    combined.includes("security check") ||
+    combined.includes("perimeterx") ||
+    combined.includes("human verification") ||
+    combined.includes("unusual traffic from your computer network") ||
+    combined.includes("press & hold") ||
+    combined.includes("please verify that you are not a robot");
+
+  if (isChallenge) {
+    return { pageState: "challenge_page", isChallenge: true };
+  }
+
+  // 2. Generic Authentication / Login Wall
+  const isLoginWall =
+    (titleLower.includes("sign in") || titleLower.includes("log in") || titleLower.includes("login")) &&
+    (combined.includes("sign in to continue") ||
+      combined.includes("enter your password") ||
+      combined.includes("login required") ||
+      combined.includes("join linkedin") ||
+      combined.includes("sign in to view this profile"));
+
+  if (isLoginWall) {
+    return { pageState: "login_wall", isChallenge: false };
+  }
+
+  // 3. Genuine 404 / Gone Page (Generic pattern matching with high confidence)
+  const isExplicitNotFoundTitle =
+    titleLower.includes("404 not found") ||
+    titleLower === "page not found" ||
+    titleLower === "not found" ||
+    titleLower.includes("404 - ") ||
+    titleLower.startsWith("error 404");
+
+  const hasNotFoundHeading = headings.some((h) => {
+    const hl = h.toLowerCase().trim();
+    return hl === "page not found" || hl === "404 - page not found" || hl === "404 not found" || hl === "error 404";
+  });
+
+  const isShortErrorBody =
+    (combined.includes("page not found") ||
+      combined.includes("the page you were looking for doesn't exist") ||
+      combined.includes("404 error") ||
+      combined.includes("we can't seem to find the page")) &&
+    wordCount < 120;
+
+  if (navStatus === 404 || isExplicitNotFoundTitle || hasNotFoundHeading || isShortErrorBody) {
+    return { pageState: "not_found_page", isChallenge: false };
+  }
+
+  // 4. Empty / Unrendered Shell
+  if (wordCount < 10 && navStatus === 200) {
+    return { pageState: "empty_shell", isChallenge: false };
+  }
+
+  // 5. Valid Rendered Destination
+  if (navStatus && navStatus >= 200 && navStatus < 400 && wordCount >= 10) {
+    return { pageState: "valid_page", isChallenge: false };
+  }
+
+  return { pageState: "unknown", isChallenge: false };
+}
+
+/**
+ * Runs Playwright verification using the shared browser pool.
  */
 export async function verifyLinkWithBrowser(
   targetUrl: string,
   timeoutMs = 12000,
 ): Promise<ExternalLinkBrowserEvidence> {
-  let browser = null;
+  const browser = await sharedBrowserPool.getBrowser();
+  if (!browser) {
+    return {
+      attempted: false,
+      navigationStatus: null,
+      challengeDetected: false,
+      checkedAt: new Date().toISOString(),
+      outcome: "http_404_browser_inconclusive",
+    };
+  }
+
+  let context = null;
   try {
-    browser = await chromium.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-    });
-    const context = await browser.newContext({
+    context = await browser.newContext({
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     });
@@ -119,56 +300,47 @@ export async function verifyLinkWithBrowser(
       waitUntil: "domcontentloaded",
       timeout: timeoutMs,
     });
-    // Brief settle time for single-page apps / client routing
+    // Settle delay for client scripts / SPA render
     await page.waitForTimeout(1000);
 
     const navStatus = response ? response.status() : 200;
     const finalUrl = page.url();
     const pageTitle = await page.title().catch(() => "");
     const bodyText = await page.evaluate(() => document.body?.innerText?.slice(0, 1000) || "").catch(() => "");
-    const lowerCombined = (pageTitle + " " + bodyText).toLowerCase();
+    const headings = await page
+      .evaluate(() => Array.from(document.querySelectorAll("h1, h2")).map((el) => (el.textContent || "").trim()))
+      .catch(() => []);
 
-    const isChallenge =
-      lowerCombined.includes("cloudflare") &&
-      (lowerCombined.includes("verify you are human") ||
-        lowerCombined.includes("turnstile") ||
-        lowerCombined.includes("just a moment") ||
-        lowerCombined.includes("security check") ||
-        lowerCombined.includes("access denied"));
-
-    const isExplicit404 =
-      navStatus === 404 ||
-      (lowerCombined.includes("page not found") &&
-        !lowerCombined.includes("sold by") &&
-        !lowerCombined.includes("accounts receivable") &&
-        bodyText.length < 300) ||
-      (pageTitle.toLowerCase().includes("not found") && bodyText.length < 200);
+    const { pageState, isChallenge } = classifyBrowserPageState(navStatus, pageTitle, bodyText, headings);
 
     let outcome: ExternalLinkOutcome = "browser_verified_ok";
-    if (isChallenge) {
+    if (pageState === "challenge_page") {
       outcome = "browser_challenge_inconclusive";
-    } else if (isExplicit404) {
+    } else if (pageState === "login_wall") {
+      outcome = "bot_blocked_inconclusive";
+    } else if (pageState === "not_found_page") {
       outcome = "confirmed_broken";
-    } else if (navStatus >= 200 && navStatus < 400 && bodyText.trim().length > 30) {
+    } else if (pageState === "valid_page") {
       outcome = "browser_verified_ok";
     } else {
       outcome = "http_404_browser_inconclusive";
     }
 
-    await browser.close();
+    await context.close();
     return {
       attempted: true,
       navigationStatus: navStatus,
       finalUrl,
       pageTitle,
+      pageState,
       visibleTextSample: bodyText.slice(0, 150),
       challengeDetected: isChallenge,
       checkedAt: new Date().toISOString(),
       outcome,
     };
   } catch (err: any) {
-    if (browser) {
-      await browser.close().catch(() => {});
+    if (context) {
+      await context.close().catch(() => {});
     }
     return {
       attempted: true,

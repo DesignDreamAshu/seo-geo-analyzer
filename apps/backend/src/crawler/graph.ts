@@ -125,14 +125,28 @@ export async function buildAndAnalyzeGraph(
     }
   }
 
-  // 2. Verify External Links Concurrently with Safe Limit
-  const MAX_EXTERNAL_CHECKS = 30; // Sample check distinct external targets
-  const externalEntries = Array.from(externalUrlsToVerify.entries()).slice(0, MAX_EXTERNAL_CHECKS);
+  // 2. Verify External Links Concurrently with Bounded Concurrency
+  const MAX_EXTERNAL_CHECKS = 50; // Verification sampling cap
+  const discoveredUniqueUrls = externalUrlsToVerify.size;
+  const discoveredOccurrences = totalExternalLinks;
 
-  let confirmedOkCount = 0;
-  let redirectedOkCount = 0;
-  let browserVerifiedOkCount = 0;
-  let confirmedBrokenCount = 0;
+  const externalEntries = Array.from(externalUrlsToVerify.entries()).slice(0, MAX_EXTERNAL_CHECKS);
+  const checkedUniqueUrls = externalEntries.length;
+  const checkedOccurrences = externalEntries.reduce((sum, [_, sources]) => sum + sources.length, 0);
+  const uncheckedUniqueUrls = discoveredUniqueUrls - checkedUniqueUrls;
+  const uncheckedOccurrences = discoveredOccurrences - checkedOccurrences;
+
+  let confirmedOkUniqueUrls = 0;
+  let confirmedOkOccurrences = 0;
+  let redirectedOkUniqueUrls = 0;
+  let redirectedOkOccurrences = 0;
+  let browserVerifiedOkUniqueUrls = 0;
+  let browserVerifiedOkOccurrences = 0;
+  let confirmedBrokenUniqueUrls = 0;
+  let confirmedBrokenOccurrences = 0;
+  let inconclusiveUniqueUrls = 0;
+  let inconclusiveOccurrences = 0;
+
   let botBlockedCount = 0;
   let rateLimitedCount = 0;
   let timeoutCount = 0;
@@ -152,16 +166,20 @@ export async function buildAndAnalyzeGraph(
 
       switch (checkResult.outcome) {
         case "confirmed_ok":
-          confirmedOkCount += sources.length;
+          confirmedOkUniqueUrls++;
+          confirmedOkOccurrences += sources.length;
           break;
         case "redirected_ok":
-          redirectedOkCount += sources.length;
+          redirectedOkUniqueUrls++;
+          redirectedOkOccurrences += sources.length;
           break;
         case "browser_verified_ok":
-          browserVerifiedOkCount += sources.length;
+          browserVerifiedOkUniqueUrls++;
+          browserVerifiedOkOccurrences += sources.length;
           break;
         case "confirmed_broken":
-          confirmedBrokenCount += sources.length;
+          confirmedBrokenUniqueUrls++;
+          confirmedBrokenOccurrences += sources.length;
           for (const src of sources) {
             brokenExternalLinks.push({
               sourceUrl: src.sourceUrl,
@@ -176,6 +194,8 @@ export async function buildAndAnalyzeGraph(
         case "bot_blocked_inconclusive":
         case "browser_challenge_inconclusive":
         case "http_404_browser_inconclusive":
+          inconclusiveUniqueUrls++;
+          inconclusiveOccurrences += sources.length;
           botBlockedCount += sources.length;
           for (const src of sources) {
             botBlockedExternalLinks.push({
@@ -188,17 +208,25 @@ export async function buildAndAnalyzeGraph(
           }
           break;
         case "rate_limited_inconclusive":
+          inconclusiveUniqueUrls++;
+          inconclusiveOccurrences += sources.length;
           rateLimitedCount += sources.length;
           break;
         case "timeout_inconclusive":
+          inconclusiveUniqueUrls++;
+          inconclusiveOccurrences += sources.length;
           timeoutCount += sources.length;
           break;
         case "dns_failure":
         case "ssl_failure":
         case "network_failure":
+          inconclusiveUniqueUrls++;
+          inconclusiveOccurrences += sources.length;
           networkDnsSslCount += sources.length;
           break;
         default:
+          inconclusiveUniqueUrls++;
+          inconclusiveOccurrences += sources.length;
           break;
       }
     })
@@ -210,13 +238,40 @@ export async function buildAndAnalyzeGraph(
     .sort((a, b) => b.count - a.count)
     .slice(0, 10);
 
+  const verificationCoveragePercent =
+    discoveredUniqueUrls > 0
+      ? Math.round((checkedUniqueUrls / discoveredUniqueUrls) * 100)
+      : 100;
+
   const externalLinkTelemetry: ExternalLinkTelemetry = {
-    uniqueExternalUrlsCount: externalUrlsToVerify.size,
-    totalExternalOccurrences: totalExternalLinks,
-    confirmedOkCount,
-    redirectedOkCount,
-    browserVerifiedOkCount,
-    confirmedBrokenCount,
+    discoveredUniqueUrls,
+    discoveredOccurrences,
+    verificationLimit: MAX_EXTERNAL_CHECKS,
+    checkedUniqueUrls,
+    checkedOccurrences,
+    uncheckedUniqueUrls,
+    uncheckedOccurrences,
+
+    confirmedOkUniqueUrls,
+    confirmedOkOccurrences,
+    redirectedOkUniqueUrls,
+    redirectedOkOccurrences,
+    browserVerifiedOkUniqueUrls,
+    browserVerifiedOkOccurrences,
+    confirmedBrokenUniqueUrls,
+    confirmedBrokenOccurrences,
+    inconclusiveUniqueUrls,
+    inconclusiveOccurrences,
+
+    verificationCoveragePercent,
+
+    // Compatibility aliases
+    uniqueExternalUrlsCount: discoveredUniqueUrls,
+    totalExternalOccurrences: discoveredOccurrences,
+    confirmedOkCount: confirmedOkOccurrences,
+    redirectedOkCount: redirectedOkOccurrences,
+    browserVerifiedOkCount: browserVerifiedOkOccurrences,
+    confirmedBrokenCount: confirmedBrokenOccurrences,
     botBlockedCount,
     rateLimitedCount,
     timeoutCount,

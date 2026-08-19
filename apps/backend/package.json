@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
+    "render-build": "npx playwright install --with-deps chromium && tsc -p tsconfig.json",
+    "postinstall": "npx playwright install chromium || true",
     "start": "node dist/index.js"
   },
   "dependencies": {

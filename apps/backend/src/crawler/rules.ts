@@ -464,12 +464,12 @@ export function evaluateAllDiagnosticRules(
       page.classification.primaryClass === "form_application" ||
       page.classification.primaryClass === "search_filter" ||
       page.renderConfidence === "manual_review";
-
-    if (!isUtilityOrForm && isStandardContentPage && page.wordCount < 180) {
+    const wordsToEvaluate = page.mainContentWordCount || page.wordCount;
+    if (!isUtilityOrForm && isStandardContentPage && wordsToEvaluate < 180) {
       thinContentPages.push({
         url: page.url,
         evidence: {
-          observed: `Main content text has only ${page.wordCount} words on ${page.classification.primaryClass} page`,
+          observed: `Main content text has only ${wordsToEvaluate} words on ${page.classification.primaryClass} page (Raw: ${page.rawDocumentWordCount || page.rawWordCount}, Visible: ${page.visibleBodyWordCount || page.wordCount})`,
           crawlTimestamp: page.crawledAt,
           sourceMode: page.sourceMode,
           sourceUrl: page.url,

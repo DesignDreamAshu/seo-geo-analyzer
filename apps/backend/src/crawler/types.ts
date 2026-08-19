@@ -159,6 +159,26 @@ export interface OutlinkEntry {
   isBroken?: boolean;
 }
 
+export type BrowserPageState =
+  | "valid_page"
+  | "not_found_page"
+  | "soft_404_candidate"
+  | "challenge_page"
+  | "login_wall"
+  | "empty_shell"
+  | "unknown";
+
+export type BrowserVerificationCapability = "available" | "unavailable" | "degraded";
+
+export type CrawlTerminationReason =
+  | "queue_exhausted"
+  | "max_pages_reached"
+  | "cancelled"
+  | "fatal_error"
+  | "timeout";
+
+export type StatusStability = "stable" | "unstable" | "unknown";
+
 export interface ExternalLinkHttpEvidence {
   status: number | null;
   finalUrl: string;
@@ -172,6 +192,7 @@ export interface ExternalLinkBrowserEvidence {
   navigationStatus?: number | null;
   finalUrl?: string;
   pageTitle?: string;
+  pageState?: BrowserPageState;
   visibleTextSample?: string;
   challengeDetected?: boolean;
   checkedAt?: string;
@@ -196,6 +217,28 @@ export interface ExternalLinkEvidence {
 }
 
 export interface ExternalLinkTelemetry {
+  discoveredUniqueUrls: number;
+  discoveredOccurrences: number;
+  verificationLimit: number;
+  checkedUniqueUrls: number;
+  checkedOccurrences: number;
+  uncheckedUniqueUrls: number;
+  uncheckedOccurrences: number;
+
+  confirmedOkUniqueUrls: number;
+  confirmedOkOccurrences: number;
+  redirectedOkUniqueUrls: number;
+  redirectedOkOccurrences: number;
+  browserVerifiedOkUniqueUrls: number;
+  browserVerifiedOkOccurrences: number;
+  confirmedBrokenUniqueUrls: number;
+  confirmedBrokenOccurrences: number;
+  inconclusiveUniqueUrls: number;
+  inconclusiveOccurrences: number;
+
+  verificationCoveragePercent: number;
+
+  // Compatibility fields
   uniqueExternalUrlsCount: number;
   totalExternalOccurrences: number;
   confirmedOkCount: number;
@@ -314,12 +357,16 @@ export interface CrawledPageData {
   renderConfidence: RenderConfidence;
   rawWordCount: number;
   renderedWordCount?: number;
+  rawDocumentWordCount: number;
+  visibleBodyWordCount: number;
+  mainContentWordCount: number;
   rawH1Count: number;
   renderedH1Count?: number;
   rawTitle: string | null;
   renderedTitle?: string | null;
   structuredDataJobTitle?: string | null;
   soft404Status: Soft404Status;
+  statusStability?: StatusStability;
 
   // Extracted Canonical DOM Features
   title: string | null;
@@ -483,6 +530,7 @@ export interface CrawlAuditResult {
   startedAt: string;
   completedAt: string;
   durationMs: number;
+  terminationReason: CrawlTerminationReason;
   healthScore: number; // 0 - 100
   auditCoveragePercent: number; // 0 - 100%
   scoreBreakdown: ScoreBreakdown;
