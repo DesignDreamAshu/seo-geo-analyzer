@@ -918,12 +918,12 @@ export async function executeParitySuite(
 
   const graphMock = createEmptyGraphMock();
 
-  for (const url of TEST_URLS) {
-    const [rawResult, authResult, browserFacts] = await Promise.all([
-      extractRawFacts(url),
-      extractProductionAuthoritativeFacts(url),
-      extractPlaywrightOracleFacts(browser, url),
-    ]);
+  for (let i = 0; i < TEST_URLS.length; i++) {
+    const url = TEST_URLS[i];
+    console.log(`[Verify:Parity] [${i + 1}/${TEST_URLS.length}] Evaluating ${url}...`);
+    const rawResult = await extractRawFacts(url);
+    const authResult = await extractProductionAuthoritativeFacts(url);
+    const browserFacts = await extractPlaywrightOracleFacts(browser, url);
 
     renderDecisionSamples.push(authResult.renderDecisionSample);
 
