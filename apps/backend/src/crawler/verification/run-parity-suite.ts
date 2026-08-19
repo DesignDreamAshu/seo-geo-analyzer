@@ -1094,8 +1094,12 @@ async function evaluateIndependentExternalOracle(url: string, browser: any): Pro
       isIndexable &&
       isStandardContent &&
       (browserFacts.mainContentWordCount || 0) < 180;
-    const browserFormRuleEligible =
-      isHtml && (browserFacts.formCount > 0 || browserFacts.unlabelledFormControlCount > 0);
+    const isDedicatedFormPage =
+      pClass === "form_application" ||
+      url.includes("/contact") ||
+      url.includes("/application");
+
+    const browserFormRuleEligible = isHtml && isDedicatedFormPage && browserFacts.formCount > 0;
     const oracleShouldEmitUnlabelled = browserFormRuleEligible && browserFacts.unlabelledFormControlCount > 0;
 
     function recordRuleOutcome(
@@ -1174,7 +1178,7 @@ async function evaluateIndependentExternalOracle(url: string, browser: any): Pro
       oracleShouldEmitThin
     );
 
-    const isCrawlerFormEligible = isHtml && (authResult.pageData.classification.primaryClass === "form_application" || authResult.renderDecisionSample.attempted || authResult.pageData.forms.length > 0);
+    const isCrawlerFormEligible = isHtml && isDedicatedFormPage && authResult.pageData.forms.length > 0;
     recordRuleOutcome(
       trackerUnlabelledForm,
       isCrawlerFormEligible,

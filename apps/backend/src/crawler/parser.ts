@@ -129,11 +129,17 @@ export function extractForms($: cheerio.CheerioAPI): FormFact[] {
         }
       }
 
-      // 4. placeholder or title as fallback
+      // 4. title or placeholder fallback
       if (!isLabelled) {
-        const titleOrPlaceholder = $ctrl.attr("title") || $ctrl.attr("placeholder");
-        if (titleOrPlaceholder) {
-          accessibleName = titleOrPlaceholder.trim();
+        const title = $ctrl.attr("title")?.trim();
+        if (title) {
+          accessibleName = title;
+          isLabelled = true;
+        } else {
+          const placeholder = $ctrl.attr("placeholder")?.trim();
+          if (placeholder) {
+            accessibleName = placeholder;
+          }
         }
       }
 
