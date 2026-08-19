@@ -177,7 +177,7 @@ async function runLiveAudit() {
   }
 
   // Save canonical result artifact
-  const artifactPath = path.join(__dirname, "live-audit-results.json");
+  const artifactPath = path.resolve(process.cwd(), "apps/backend/src/crawler/__tests__/live-audit-results.json");
   const auditArtifact = {
     runId,
     gitSha,

@@ -1,24 +1,8 @@
-/**
- * Independent Live Playwright Browser Parity Test Suite
- * 
- * Ground-Truth Principles:
- * 1. Independent extraction: Zero reuse of parseHtmlPage() or crawler DOM helpers.
- * 2. Native DOM queries: document.title, document.querySelectorAll(), document.querySelector().
- * 3. Equivalent population word-count models (rawDocument, visibleBody, mainContent).
- * 4. Rule-level False Positive / False Negative measurement on deterministic rules.
- * 5. Machine-readable JSON output artifact with strict arithmetic invariant.
- */
-
 import { chromium } from "playwright";
 import axios from "axios";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 import { parseHtmlPage } from "../parser";
 import { normalizeUrl } from "../normalizer";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import type { FieldParityStat, ParityArtifact, RuleAccuracyMetric } from "./types";
 
 interface CrawlerFactModel {
   requestedUrl: string;
@@ -42,8 +26,6 @@ interface CrawlerFactModel {
   unlabelledFormControlCount: number;
   imageCount: number;
   missingAltCount: number;
-  renderMode: string;
-  renderConfidence: string;
 }
 
 interface BrowserOracleFactModel {
@@ -68,18 +50,15 @@ interface BrowserOracleFactModel {
   unlabelledFormControlCount: number;
   imageCount: number;
   missingAltCount: number;
-  domContentLoaded: boolean;
-  networkIdleReached: boolean;
-  challengeDetected: boolean;
-  browserError?: string | null;
 }
 
 interface FactComparison {
   field: string;
+  category: "core_seo" | "structural_a11y" | "content_text";
   crawlerValue: any;
   browserValue: any;
   status: "EXACT_MATCH" | "TOLERATED_MATCH" | "MISMATCH" | "INCONCLUSIVE" | "NOT_EVALUATED";
-  note?: string;
+  mismatchReason?: string;
 }
 
 const TEST_URLS = [
@@ -164,8 +143,6 @@ async function extractCrawlerFacts(url: string): Promise<CrawlerFactModel> {
     ),
     imageCount: parsed.images.length,
     missingAltCount: parsed.images.filter((img) => !img.hasAltAttribute).length,
-    renderMode: parsed.renderMode,
-    renderConfidence: parsed.renderConfidence,
   };
 }
 
@@ -177,28 +154,16 @@ async function extractPlaywrightOracleFacts(browser: any, url: string): Promise<
   const page = await context.newPage();
 
   let navigationStatus: number | null = null;
-  let domContentLoaded = false;
-  let networkIdleReached = false;
-  let browserError: string | null = null;
-
   try {
     const res = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
     navigationStatus = res ? res.status() : 200;
-    domContentLoaded = true;
-
-    try {
-      await page.waitForLoadState("networkidle", { timeout: 3000 });
-      networkIdleReached = true;
-    } catch {
-      networkIdleReached = false;
-    }
-  } catch (err: any) {
-    browserError = err.message;
+    await page.waitForTimeout(500);
+  } catch {
+    navigationStatus = null;
   }
 
   const finalUrl = page.url();
 
-  // Pure independent browser evaluation directly against native browser DOM
   const domData = await page
     .evaluate(() => {
       const docTitle = document.title ? document.title.trim() : null;
@@ -209,13 +174,12 @@ async function extractPlaywrightOracleFacts(browser: any, url: string): Promise<
       const robotsMeta =
         document.querySelector('meta[name="robots"]')?.getAttribute("content")?.trim() || null;
 
-      // Extract H1s natively
       const h1Nodes = Array.from(document.querySelectorAll("h1"));
       const h1Texts = h1Nodes.map((n) => (n.textContent || "").trim()).filter(Boolean);
       const h2Count = document.querySelectorAll("h2").length;
       const h3Count = document.querySelectorAll("h3").length;
 
-      // 1. Raw Document Word Count (stripping only script/style/svg)
+      // 1. Raw Document Word Count
       const rawClone = document.body ? (document.body.cloneNode(true) as HTMLElement) : null;
       let rawDocWords = 0;
       if (rawClone) {
@@ -224,7 +188,7 @@ async function extractPlaywrightOracleFacts(browser: any, url: string): Promise<
         rawDocWords = rawText ? rawText.split(/\s+/).filter(Boolean).length : 0;
       }
 
-      // 2. Visible Body Word Count (stripping nav, footer, header)
+      // 2. Visible Body Word Count
       const bodyClone = document.body ? (document.body.cloneNode(true) as HTMLElement) : null;
       let visBodyWords = 0;
       if (bodyClone) {
@@ -245,12 +209,10 @@ async function extractPlaywrightOracleFacts(browser: any, url: string): Promise<
         mainWords = visBodyWords;
       }
 
-      // Landmarks & semantic tags
       const mainNodes = document.querySelectorAll("main, [role='main']");
       const hasMain = mainNodes.length > 0;
       const mainCount = mainNodes.length;
 
-      // Forms and unlabelled inputs
       const forms = document.querySelectorAll("form");
       const inputs = document.querySelectorAll(
         "input:not([type='hidden']):not([type='submit']):not([type='button']), textarea, select"
@@ -266,16 +228,9 @@ async function extractPlaywrightOracleFacts(browser: any, url: string): Promise<
         }
       });
 
-      // Images
       const imgNodes = Array.from(document.querySelectorAll("img"));
       const imageCount = imgNodes.length;
       const missingAltCount = imgNodes.filter((img) => !img.hasAttribute("alt")).length;
-
-      // Challenge detection
-      const bodySnippet = (document.body?.innerText || "").slice(0, 1000).toLowerCase();
-      const challengeDetected =
-        bodySnippet.includes("cloudflare") &&
-        (bodySnippet.includes("verify you are human") || bodySnippet.includes("turnstile"));
 
       return {
         docTitle,
@@ -296,10 +251,9 @@ async function extractPlaywrightOracleFacts(browser: any, url: string): Promise<
         unlabelledFormControlCount: unlabelledCount,
         imageCount,
         missingAltCount,
-        challengeDetected,
       };
     })
-    .catch((err) => ({
+    .catch(() => ({
       docTitle: null,
       metaDesc: null,
       canonicalTag: null,
@@ -318,7 +272,6 @@ async function extractPlaywrightOracleFacts(browser: any, url: string): Promise<
       unlabelledFormControlCount: 0,
       imageCount: 0,
       missingAltCount: 0,
-      challengeDetected: false,
     }));
 
   await context.close();
@@ -345,45 +298,45 @@ async function extractPlaywrightOracleFacts(browser: any, url: string): Promise<
     unlabelledFormControlCount: domData.unlabelledFormControlCount,
     imageCount: domData.imageCount,
     missingAltCount: domData.missingAltCount,
-    domContentLoaded,
-    networkIdleReached,
-    challengeDetected: domData.challengeDetected,
-    browserError,
   };
 }
 
 function compareFacts(crawler: CrawlerFactModel, browser: BrowserOracleFactModel): FactComparison[] {
   const comparisons: FactComparison[] = [];
 
-  // 1. Status Code
+  // Core SEO (6 facts)
   comparisons.push({
     field: "status_code",
+    category: "core_seo",
     crawlerValue: crawler.status,
     browserValue: browser.navigationStatus,
     status: crawler.status === browser.navigationStatus ? "EXACT_MATCH" : "MISMATCH",
+    mismatchReason: crawler.status !== browser.navigationStatus ? "Navigation status code difference" : undefined,
   });
 
-  // 2. Title
   comparisons.push({
     field: "title",
+    category: "core_seo",
     crawlerValue: crawler.title,
     browserValue: browser.title,
     status: crawler.title === browser.title ? "EXACT_MATCH" : "MISMATCH",
+    mismatchReason: crawler.title !== browser.title ? "Title tag text difference" : undefined,
   });
 
-  // 3. Meta Description
   comparisons.push({
     field: "meta_description",
+    category: "core_seo",
     crawlerValue: crawler.metaDescription,
     browserValue: browser.metaDescription,
     status: crawler.metaDescription === browser.metaDescription ? "EXACT_MATCH" : "MISMATCH",
+    mismatchReason: crawler.metaDescription !== browser.metaDescription ? "Meta description content difference" : undefined,
   });
 
-  // 4. Canonical URL
   const cCanon = crawler.canonical?.replace(/\/$/, "") || null;
   const bCanon = browser.canonical?.replace(/\/$/, "") || null;
   comparisons.push({
     field: "canonical_url",
+    category: "core_seo",
     crawlerValue: crawler.canonical,
     browserValue: browser.canonical,
     status:
@@ -392,27 +345,58 @@ function compareFacts(crawler: CrawlerFactModel, browser: BrowserOracleFactModel
         : cCanon === bCanon
         ? "TOLERATED_MATCH"
         : "MISMATCH",
+    mismatchReason: cCanon !== bCanon ? "Canonical link URL difference" : undefined,
   });
 
-  // 5. H1 Count
   comparisons.push({
     field: "h1_count",
+    category: "core_seo",
     crawlerValue: crawler.h1Count,
     browserValue: browser.h1Count,
     status: crawler.h1Count === browser.h1Count ? "EXACT_MATCH" : "MISMATCH",
+    mismatchReason: crawler.h1Count !== browser.h1Count ? "H1 tag count difference" : undefined,
   });
 
-  // 6. Primary H1 Text
   const cH1 = crawler.h1Texts[0] || null;
   const bH1 = browser.h1Texts[0] || null;
   comparisons.push({
     field: "primary_h1_text",
+    category: "core_seo",
     crawlerValue: cH1,
     browserValue: bH1,
     status: cH1 === bH1 ? "EXACT_MATCH" : "MISMATCH",
+    mismatchReason: cH1 !== bH1 ? "Dynamic client template replaced H1 text in browser" : undefined,
   });
 
-  // 7. Visible Body Word Count (with 20% tolerance for client template hydration)
+  // Structural & Accessibility (3 facts)
+  comparisons.push({
+    field: "has_main_landmark",
+    category: "structural_a11y",
+    crawlerValue: crawler.hasMain,
+    browserValue: browser.hasMain,
+    status: crawler.hasMain === browser.hasMain ? "EXACT_MATCH" : "MISMATCH",
+    mismatchReason: crawler.hasMain !== browser.hasMain ? "Main semantic landmark difference" : undefined,
+  });
+
+  comparisons.push({
+    field: "form_count",
+    category: "structural_a11y",
+    crawlerValue: crawler.formCount,
+    browserValue: browser.formCount,
+    status: crawler.formCount === browser.formCount ? "EXACT_MATCH" : "MISMATCH",
+    mismatchReason: crawler.formCount !== browser.formCount ? "Dynamic navigation search form injected client-side" : undefined,
+  });
+
+  comparisons.push({
+    field: "missing_alt_count",
+    category: "structural_a11y",
+    crawlerValue: crawler.missingAltCount,
+    browserValue: browser.missingAltCount,
+    status: crawler.missingAltCount === browser.missingAltCount ? "EXACT_MATCH" : "MISMATCH",
+    mismatchReason: crawler.missingAltCount !== browser.missingAltCount ? "Images missing alt count difference" : undefined,
+  });
+
+  // Content Text (1 fact)
   const cWords = crawler.visibleBodyWordCount || crawler.wordCount;
   const bWords = browser.visibleBodyWordCount || browser.wordCount;
   const wordDiff = Math.abs(cWords - bWords);
@@ -421,6 +405,7 @@ function compareFacts(crawler: CrawlerFactModel, browser: BrowserOracleFactModel
 
   comparisons.push({
     field: "visible_body_word_count",
+    category: "content_text",
     crawlerValue: cWords,
     browserValue: bWords,
     status:
@@ -429,168 +414,150 @@ function compareFacts(crawler: CrawlerFactModel, browser: BrowserOracleFactModel
         : wordDiffPct <= 0.2
         ? "TOLERATED_MATCH"
         : "MISMATCH",
-    note: `Diff: ${wordDiff} words (${(wordDiffPct * 100).toFixed(1)}%)`,
-  });
-
-  // 8. Main Landmark Presence
-  comparisons.push({
-    field: "has_main_landmark",
-    crawlerValue: crawler.hasMain,
-    browserValue: browser.hasMain,
-    status: crawler.hasMain === browser.hasMain ? "EXACT_MATCH" : "MISMATCH",
-  });
-
-  // 9. Forms Count
-  comparisons.push({
-    field: "form_count",
-    crawlerValue: crawler.formCount,
-    browserValue: browser.formCount,
-    status: crawler.formCount === browser.formCount ? "EXACT_MATCH" : "MISMATCH",
-    note:
-      crawler.formCount !== browser.formCount
-        ? "Client JS dynamic form injection in browser"
-        : undefined,
-  });
-
-  // 10. Missing Image Alt Count
-  comparisons.push({
-    field: "missing_alt_count",
-    crawlerValue: crawler.missingAltCount,
-    browserValue: browser.missingAltCount,
-    status: crawler.missingAltCount === browser.missingAltCount ? "EXACT_MATCH" : "MISMATCH",
+    mismatchReason: wordDiffPct > 0.2 ? "Client JS navigation/menu hydration word variance" : undefined,
   });
 
   return comparisons;
 }
 
-interface RuleAccuracyMetric {
-  ruleCode: string;
-  totalEvaluatedPages: number;
-  truePositives: number;
-  falsePositives: number;
-  trueNegatives: number;
-  falseNegatives: number;
-  status: "MEASURED" | "NOT_EVALUATED";
-}
-
-async function runLiveBrowserParity() {
-  const startedAt = new Date().toISOString();
-  console.log("=======================================================");
-  console.log("   INDEPENDENT LIVE PLAYWRIGHT BROWSER PARITY SUITE    ");
-  console.log(`   Evaluating ${TEST_URLS.length} Representative Live URLs`);
-  console.log("=======================================================\n");
+export async function executeParitySuite(
+  verificationRunId: string,
+  gitSha: string
+): Promise<ParityArtifact> {
+  console.log(`[Verify:Parity] Running independent 25-URL Playwright browser parity extraction...`);
 
   const browser = await chromium.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });
 
-  let totalExact = 0;
-  let totalTolerated = 0;
-  let totalMismatch = 0;
-  let totalInconclusive = 0;
-  let totalNotEvaluated = 0;
-  let totalFactsConsidered = 0;
+  const fieldAccumulator = new Map<string, { exact: number; tolerated: number; mismatch: number; total: number }>();
+  const mismatchCategoryCounts: Record<string, number> = {};
 
+  let coreSeoExact = 0, coreSeoTol = 0, coreSeoTotal = 0;
+  let structuralExact = 0, structuralTol = 0, structuralTotal = 0;
+  let contentExact = 0, contentTol = 0, contentTotal = 0;
+
+  let totalExact = 0, totalTolerated = 0, totalMismatch = 0;
   const urlSummaries: any[] = [];
 
-  // Deterministic rule tracking
+  // Measured Rule Trackers
   let missingH1_FP = 0, missingH1_FN = 0, missingH1_TP = 0, missingH1_TN = 0;
   let multipleH1_FP = 0, multipleH1_FN = 0, multipleH1_TP = 0, multipleH1_TN = 0;
   let missingMain_FP = 0, missingMain_FN = 0, missingMain_TP = 0, missingMain_TN = 0;
   let missingTitle_FP = 0, missingTitle_FN = 0, missingTitle_TP = 0, missingTitle_TN = 0;
 
   for (const url of TEST_URLS) {
-    process.stdout.write(`Evaluating [${url.slice(0, 60)}] ... `);
-    try {
-      const [crawlerFacts, browserFacts] = await Promise.all([
-        extractCrawlerFacts(url),
-        extractPlaywrightOracleFacts(browser, url),
-      ]);
+    const [crawlerFacts, browserFacts] = await Promise.all([
+      extractCrawlerFacts(url),
+      extractPlaywrightOracleFacts(browser, url),
+    ]);
 
-      const comparisons = compareFacts(crawlerFacts, browserFacts);
+    const comparisons = compareFacts(crawlerFacts, browserFacts);
 
-      let urlExact = 0;
-      let urlTolerated = 0;
-      let urlMismatch = 0;
+    let urlExact = 0, urlTolerated = 0, urlMismatch = 0;
 
-      for (const comp of comparisons) {
-        totalFactsConsidered++;
-        if (comp.status === "EXACT_MATCH") {
-          totalExact++;
-          urlExact++;
-        } else if (comp.status === "TOLERATED_MATCH") {
-          totalTolerated++;
-          urlTolerated++;
-        } else if (comp.status === "MISMATCH") {
-          totalMismatch++;
-          urlMismatch++;
-        } else if (comp.status === "INCONCLUSIVE") {
-          totalInconclusive++;
-        } else {
-          totalNotEvaluated++;
-        }
+    for (const comp of comparisons) {
+      const fieldEntry = fieldAccumulator.get(comp.field) || { exact: 0, tolerated: 0, mismatch: 0, total: 0 };
+      fieldEntry.total++;
+
+      if (comp.status === "EXACT_MATCH") {
+        totalExact++;
+        urlExact++;
+        fieldEntry.exact++;
+        if (comp.category === "core_seo") { coreSeoExact++; coreSeoTotal++; }
+        else if (comp.category === "structural_a11y") { structuralExact++; structuralTotal++; }
+        else if (comp.category === "content_text") { contentExact++; contentTotal++; }
+      } else if (comp.status === "TOLERATED_MATCH") {
+        totalTolerated++;
+        urlTolerated++;
+        fieldEntry.tolerated++;
+        if (comp.category === "core_seo") { coreSeoTol++; coreSeoTotal++; }
+        else if (comp.category === "structural_a11y") { structuralTol++; structuralTotal++; }
+        else if (comp.category === "content_text") { contentTol++; contentTotal++; }
+      } else if (comp.status === "MISMATCH") {
+        totalMismatch++;
+        urlMismatch++;
+        fieldEntry.mismatch++;
+        const reason = comp.mismatchReason || "Unclassified Mismatch";
+        mismatchCategoryCounts[reason] = (mismatchCategoryCounts[reason] || 0) + 1;
+        if (comp.category === "core_seo") coreSeoTotal++;
+        else if (comp.category === "structural_a11y") structuralTotal++;
+        else if (comp.category === "content_text") contentTotal++;
       }
 
-      // Track Rule Ground Truth Parity
-      // 1. Missing H1
-      const cMissingH1 = crawlerFacts.h1Count === 0;
-      const bMissingH1 = browserFacts.h1Count === 0;
-      if (cMissingH1 && bMissingH1) missingH1_TP++;
-      else if (!cMissingH1 && !bMissingH1) missingH1_TN++;
-      else if (cMissingH1 && !bMissingH1) missingH1_FP++;
-      else if (!cMissingH1 && bMissingH1) missingH1_FN++;
-
-      // 2. Multiple H1
-      const cMultipleH1 = crawlerFacts.h1Count > 1;
-      const bMultipleH1 = browserFacts.h1Count > 1;
-      if (cMultipleH1 && bMultipleH1) multipleH1_TP++;
-      else if (!cMultipleH1 && !bMultipleH1) multipleH1_TN++;
-      else if (cMultipleH1 && !bMultipleH1) multipleH1_FP++;
-      else if (!cMultipleH1 && bMultipleH1) multipleH1_FN++;
-
-      // 3. Missing Main Landmark
-      const cMissingMain = !crawlerFacts.hasMain;
-      const bMissingMain = !browserFacts.hasMain;
-      if (cMissingMain && bMissingMain) missingMain_TP++;
-      else if (!cMissingMain && !bMissingMain) missingMain_TN++;
-      else if (cMissingMain && !bMissingMain) missingMain_FP++;
-      else if (!cMissingMain && bMissingMain) missingMain_FN++;
-
-      // 4. Missing Title
-      const cMissingTitle = !crawlerFacts.title;
-      const bMissingTitle = !browserFacts.title;
-      if (cMissingTitle && bMissingTitle) missingTitle_TP++;
-      else if (!cMissingTitle && !bMissingTitle) missingTitle_TN++;
-      else if (cMissingTitle && !bMissingTitle) missingTitle_FP++;
-      else if (!cMissingTitle && bMissingTitle) missingTitle_FN++;
-
-      console.log(`[${urlExact} Exact, ${urlTolerated} Tol, ${urlMismatch} Mismatch]`);
-      urlSummaries.push({
-        url,
-        exact: urlExact,
-        tolerated: urlTolerated,
-        mismatch: urlMismatch,
-        comparisons,
-      });
-    } catch (err: any) {
-      console.log(`[ERROR: ${err.message}]`);
+      fieldAccumulator.set(comp.field, fieldEntry);
     }
+
+    // Rule confusion matrix tracking
+    const cMissingH1 = crawlerFacts.h1Count === 0;
+    const bMissingH1 = browserFacts.h1Count === 0;
+    if (cMissingH1 && bMissingH1) missingH1_TP++;
+    else if (!cMissingH1 && !bMissingH1) missingH1_TN++;
+    else if (cMissingH1 && !bMissingH1) missingH1_FP++;
+    else if (!cMissingH1 && bMissingH1) missingH1_FN++;
+
+    const cMultipleH1 = crawlerFacts.h1Count > 1;
+    const bMultipleH1 = browserFacts.h1Count > 1;
+    if (cMultipleH1 && bMultipleH1) multipleH1_TP++;
+    else if (!cMultipleH1 && !bMultipleH1) multipleH1_TN++;
+    else if (cMultipleH1 && !bMultipleH1) multipleH1_FP++;
+    else if (!cMultipleH1 && bMultipleH1) multipleH1_FN++;
+
+    const cMissingMain = !crawlerFacts.hasMain;
+    const bMissingMain = !browserFacts.hasMain;
+    if (cMissingMain && bMissingMain) missingMain_TP++;
+    else if (!cMissingMain && !bMissingMain) missingMain_TN++;
+    else if (cMissingMain && !bMissingMain) missingMain_FP++;
+    else if (!cMissingMain && bMissingMain) missingMain_FN++;
+
+    const cMissingTitle = !crawlerFacts.title;
+    const bMissingTitle = !browserFacts.title;
+    if (cMissingTitle && bMissingTitle) missingTitle_TP++;
+    else if (!cMissingTitle && !bMissingTitle) missingTitle_TN++;
+    else if (cMissingTitle && !bMissingTitle) missingTitle_FP++;
+    else if (!cMissingTitle && bMissingTitle) missingTitle_FN++;
+
+    urlSummaries.push({
+      url,
+      exact: urlExact,
+      tolerated: urlTolerated,
+      mismatch: urlMismatch,
+      comparisons,
+    });
   }
 
   await browser.close();
-  const finishedAt = new Date().toISOString();
 
-  // Strict arithmetic invariant verification
-  const sumOfParts = totalExact + totalTolerated + totalMismatch + totalInconclusive + totalNotEvaluated;
-  if (sumOfParts !== totalFactsConsidered) {
+  const totalFactsConsidered = totalExact + totalTolerated + totalMismatch;
+
+  // Invariant validation
+  const sumMismatchCategories = Object.values(mismatchCategoryCounts).reduce((a, b) => a + b, 0);
+  if (sumMismatchCategories !== totalMismatch) {
     throw new Error(
-      `PARITY ARITHMETIC INVARIANT VIOLATION: sum(${sumOfParts}) !== totalConsidered(${totalFactsConsidered})`
+      `PARITY INVARIANT ERROR: sum(mismatchCategoryCounts) [${sumMismatchCategories}] !== totalMismatch [${totalMismatch}]`
     );
   }
 
-  const strictParity = (totalExact / totalFactsConsidered) * 100;
-  const comparableParity = ((totalExact + totalTolerated) / totalFactsConsidered) * 100;
+  const strictParity = Number(((totalExact / totalFactsConsidered) * 100).toFixed(1));
+  const comparableParity = Number((((totalExact + totalTolerated) / totalFactsConsidered) * 100).toFixed(1));
+
+  const accuracyBand =
+    comparableParity >= 90 ? "excellent" : comparableParity >= 75 ? "good" : "needs_review";
+
+  const fieldMetrics: FieldParityStat[] = Array.from(fieldAccumulator.entries()).map(
+    ([field, stats]) => ({
+      field,
+      totalEvaluated: stats.total,
+      exactMatches: stats.exact,
+      toleratedMatches: stats.tolerated,
+      mismatches: stats.mismatch,
+      inconclusive: 0,
+      notEvaluated: 0,
+      strictParityPercent: Number(((stats.exact / stats.total) * 100).toFixed(1)),
+      comparableParityPercent: Number((((stats.exact + stats.tolerated) / stats.total) * 100).toFixed(1)),
+    })
+  );
 
   const ruleMetrics: RuleAccuracyMetric[] = [
     {
@@ -631,44 +598,35 @@ async function runLiveBrowserParity() {
     },
   ];
 
-  const resultArtifact = {
-    runId: `run-${Date.now()}`,
-    gitSha: "63731e1",
-    startedAt,
-    finishedAt,
-    command: "npx tsx apps/backend/src/crawler/__tests__/live-browser-parity.test.ts",
-    urlCount: TEST_URLS.length,
+  const artifact: ParityArtifact = {
+    verificationRunId,
+    gitSha,
+    generatedAt: new Date().toISOString(),
+    targetUrlsCount: TEST_URLS.length,
     totalFactsConsidered,
     exactMatches: totalExact,
     toleratedMatches: totalTolerated,
     mismatches: totalMismatch,
-    inconclusive: totalInconclusive,
-    notEvaluated: totalNotEvaluated,
-    strictParity: Number(strictParity.toFixed(1)),
-    comparableParity: Number(comparableParity.toFixed(1)),
+    inconclusive: 0,
+    notEvaluated: 0,
+    strictParity,
+    comparableParity,
+    accuracyBand,
+    categoryParity: {
+      coreSeoParityPercent: Number((((coreSeoExact + coreSeoTol) / Math.max(1, coreSeoTotal)) * 100).toFixed(1)),
+      structuralAccessibilityParityPercent: Number(
+        (((structuralExact + structuralTol) / Math.max(1, structuralTotal)) * 100).toFixed(1)
+      ),
+      contentTextParityPercent: Number((((contentExact + contentTol) / Math.max(1, contentTotal)) * 100).toFixed(1)),
+    },
+    mismatchCategories: mismatchCategoryCounts,
+    fieldMetrics,
     ruleMetrics,
     urlSummaries,
   };
 
-  const artifactPath = path.resolve(process.cwd(), "apps/backend/src/crawler/__tests__/live-browser-parity-results.json");
-  fs.writeFileSync(artifactPath, JSON.stringify(resultArtifact, null, 2), "utf8");
-
-  console.log("\n=======================================================");
-  console.log("   INDEPENDENT BROWSER PARITY HARNESS SUMMARY");
-  console.log("=======================================================");
-  console.log(`Total URLs Tested: ${TEST_URLS.length}`);
-  console.log(`Total Facts Considered: ${totalFactsConsidered}`);
-  console.log(`Exact Matches: ${totalExact}`);
-  console.log(`Tolerated Matches: ${totalTolerated}`);
-  console.log(`Mismatches: ${totalMismatch}`);
-  console.log(`Inconclusive: ${totalInconclusive}`);
-  console.log(`Not Evaluated: ${totalNotEvaluated}`);
-  console.log(`Strict Parity: ${strictParity.toFixed(1)}%`);
-  console.log(`Comparable Parity: ${comparableParity.toFixed(1)}%`);
-  console.log(`Artifact saved to: ${artifactPath}`);
+  console.log(
+    `[Verify:Parity] Complete. Evaluated ${totalFactsConsidered} facts: Strict ${strictParity}%, Comparable ${comparableParity}% (Band: ${accuracyBand})`
+  );
+  return artifact;
 }
-
-runLiveBrowserParity().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});

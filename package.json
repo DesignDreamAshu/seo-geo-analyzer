@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "tsx watch apps/backend/src/index.ts",
     "build": "npm --workspace apps/backend run build",
+    "verify:release": "npm --workspace apps/backend run verify:release",
     "start": "node apps/backend/dist/index.js"
   },
   "devDependencies": {

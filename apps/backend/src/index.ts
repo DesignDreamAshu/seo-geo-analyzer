@@ -7,6 +7,7 @@ import { generatePdf } from "html-pdf-node";
 import { ReportGenerator } from "lighthouse/report/generator/report-generator.js";
 import { analyzeSite, AnalysisTimeoutError, calculateWeightedScore } from "./analysis";
 import { runSiteAuditCrawl } from "./crawler/engine";
+import { checkBrowserCapability } from "./crawler/fetcher";
 import { normalizeAuditUrl } from "./storage/lighthouse-store";
 import { saveShareRecord, getShareRecord } from "./storage/share-store";
 import type { ExportPayload, ModuleSnapshot } from "./types";
@@ -494,6 +495,20 @@ app.get("/", (_req, res) => {
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "seo-geo-analyzer-api", time: new Date().toISOString() });
+});
+
+app.get("/api/health/browser", async (_req, res) => {
+  const capability = await checkBrowserCapability();
+  return res.json({
+    ok: capability.capability === "available",
+    runtime: process.env.RENDER ? "render" : "local",
+    nodeVersion: process.version,
+    platform: process.platform,
+    arch: process.arch,
+    capability: capability.capability,
+    details: capability.details,
+    timestamp: new Date().toISOString(),
+  });
 });
 
 app.post("/api/lighthouse-runs", async (req, res) => {
