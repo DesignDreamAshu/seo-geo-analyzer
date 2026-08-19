@@ -13,8 +13,12 @@ import { chromium } from "playwright";
 import axios from "axios";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 import { parseHtmlPage } from "../parser";
 import { normalizeUrl } from "../normalizer";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 interface CrawlerFactModel {
   requestedUrl: string;
