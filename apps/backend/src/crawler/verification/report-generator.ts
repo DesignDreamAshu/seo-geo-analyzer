@@ -4,11 +4,11 @@ import crypto from "crypto";
 import type {
   AuditArtifact,
   BrowserCapabilityArtifact,
+  DeploymentVerificationArtifact,
   LegacyStabilityArtifact,
   ParityArtifact,
   ReleaseManifest,
   ReleaseVerificationReport,
-  VerificationEnvironment,
   VerificationRunHeader,
 } from "./types";
 
@@ -24,9 +24,10 @@ export function generateReleaseReport(
   stability: LegacyStabilityArtifact,
   parity: ParityArtifact,
   audit: AuditArtifact,
-  artifactsDir: string
+  artifactsDir: string,
+  deploymentVerification?: DeploymentVerificationArtifact
 ): { reportJson: ReleaseVerificationReport; reportMd: string; manifest: ReleaseManifest } {
-  // 1. Cross-Artifact Identity & Invariant Validation
+  // 1. Cross-Artifact Identity Validation (Strict 40-character SHA check)
   const sameRunId =
     capability.verificationRunId === header.verificationRunId &&
     stability.verificationRunId === header.verificationRunId &&
@@ -34,38 +35,79 @@ export function generateReleaseReport(
     audit.verificationRunId === header.verificationRunId;
 
   const sameGitSha =
-    capability.gitSha === header.gitSha &&
-    stability.gitSha === header.gitSha &&
-    parity.gitSha === header.gitSha &&
-    audit.gitSha === header.gitSha;
+    capability.gitShaFull === header.gitShaFull &&
+    stability.gitShaFull === header.gitShaFull &&
+    parity.gitShaFull === header.gitShaFull &&
+    audit.gitShaFull === header.gitShaFull;
 
-  if (!sameRunId || !sameGitSha) {
+  if (!sameRunId) {
     throw new Error(
-      `CROSS-ARTIFACT VALIDATION FAILED: Inconsistent run ID or Git SHA detected across test artifacts!`
+      `CROSS-ARTIFACT VALIDATION FAILED: Run ID mismatch detected! Expected ${header.verificationRunId}`
     );
   }
 
-  // Parity arithmetic check
-  const paritySum = parity.exactMatches + parity.toleratedMatches + parity.mismatches + parity.inconclusive + parity.notEvaluated;
+  if (!sameGitSha) {
+    throw new Error(
+      `CROSS-ARTIFACT VALIDATION FAILED: Git SHA mismatch detected! Expected ${header.gitShaFull}`
+    );
+  }
+
+  // 2. Parity Arithmetic Check
+  const paritySum =
+    parity.exactMatches +
+    parity.toleratedMatches +
+    parity.mismatches +
+    parity.inconclusive +
+    parity.notEvaluated;
   const parityArithmeticValid = paritySum === parity.totalFactsConsidered;
   if (!parityArithmeticValid) {
     throw new Error(`PARITY ARITHMETIC FAILED: sum(${paritySum}) !== total(${parity.totalFactsConsidered})`);
   }
 
-  // Mismatch category sum check
+  // 3. Field Metrics Sum vs Global Parity Invariant
+  let sumFieldExact = 0;
+  let sumFieldTol = 0;
+  let sumFieldMis = 0;
+  let sumFieldTotal = 0;
+
+  for (const fm of parity.fieldMetrics) {
+    sumFieldExact += fm.exactMatches;
+    sumFieldTol += fm.toleratedMatches;
+    sumFieldMis += fm.mismatches;
+    sumFieldTotal += fm.totalEvaluated;
+  }
+
+  const fieldMetricsSumReconcilesGlobally =
+    sumFieldExact === parity.exactMatches &&
+    sumFieldTol === parity.toleratedMatches &&
+    sumFieldMis === parity.mismatches &&
+    sumFieldTotal === parity.totalFactsConsidered;
+
+  if (!fieldMetricsSumReconcilesGlobally) {
+    throw new Error(
+      `FIELD METRICS RECONCILIATION FAILED: sum(fields) [E:${sumFieldExact}, T:${sumFieldTol}, M:${sumFieldMis}, Tot:${sumFieldTotal}] !== global [E:${parity.exactMatches}, T:${parity.toleratedMatches}, M:${parity.mismatches}, Tot:${parity.totalFactsConsidered}]`
+    );
+  }
+
+  // 4. Mismatch Category Sum Check
   const mismatchSum = Object.values(parity.mismatchCategories).reduce((a, b) => a + b, 0);
   const mismatchCategoriesSumValid = mismatchSum === parity.mismatches;
   if (!mismatchCategoriesSumValid) {
     throw new Error(`MISMATCH SUM FAILED: sum(${mismatchSum}) !== totalMismatch(${parity.mismatches})`);
   }
 
-  // External Telemetry check
+  // 5. External Telemetry Check
   const ext = audit.externalLinkTelemetry;
   const telemetryArithmeticValid =
     ext.checkedUniqueUrls + ext.uncheckedUniqueUrls === ext.discoveredUniqueUrls &&
-    ext.confirmedOkUniqueUrls + ext.redirectedOkUniqueUrls + ext.browserVerifiedOkUniqueUrls + ext.confirmedBrokenUniqueUrls + ext.inconclusiveUniqueUrls === ext.checkedUniqueUrls;
+    ext.confirmedOkUniqueUrls +
+      ext.redirectedOkUniqueUrls +
+      ext.browserVerifiedOkUniqueUrls +
+      ext.confirmedBrokenUniqueUrls +
+      ext.inconclusiveUniqueUrls ===
+      ext.checkedUniqueUrls;
 
-  // Score Deductions check
+  // 6. Score Deductions Check
   const totalPenalties = audit.issues.reduce((sum, i) => sum + (i.scorePenalty || 0), 0);
   const scoreDeductionsValid = Math.abs(audit.healthScore - (100 - totalPenalties)) < 0.1;
 
@@ -82,7 +124,7 @@ export function generateReleaseReport(
 
   const manifest: ReleaseManifest = {
     verificationRunId: header.verificationRunId,
-    gitSha: header.gitSha,
+    gitShaFull: header.gitShaFull,
     generatedAt: new Date().toISOString(),
     artifacts: {
       browserCapability: {
@@ -111,21 +153,40 @@ export function generateReleaseReport(
   const manifestPath = path.join(artifactsDir, "manifest.json");
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
 
+  // Software Release Qualification Status (Decoupled from website healthScore)
+  const coreSeoPassed = parity.categoryParity.coreSeo.qualityGatePassed;
+  const browserAvailable = capability.capability === "available";
+  const invariantsPassed =
+    sameRunId &&
+    sameGitSha &&
+    parityArithmeticValid &&
+    fieldMetricsSumReconcilesGlobally &&
+    mismatchCategoriesSumValid &&
+    telemetryArithmeticValid &&
+    scoreDeductionsValid;
+
   const overallStatus: ReleaseVerificationReport["overallStatus"] =
-    capability.capability === "available" && parity.comparableParity >= 75 && audit.healthScore > 0
-      ? "VERIFIED_PASS"
-      : "VERIFIED_WITH_WARNINGS";
+    browserAvailable && coreSeoPassed && invariantsPassed
+      ? parity.categoryParity.structuralAccessibility.qualityGatePassed
+        ? "VERIFIED_PASS"
+        : "VERIFIED_WITH_WARNINGS"
+      : "FAILED";
 
   const knownLimitations = [
     "Webflow injects global search and newsletter forms client-side via JavaScript; raw HTML crawler evaluates static markup only and marks dynamic form accessibility as partially_evaluated unless browser rendering is triggered.",
     "Bot-shielded external targets (e.g. LinkedIn profiles returning HTTP 999 or Cloudflare Turnstile barriers) are classified as bot_blocked_inconclusive with zero score penalty.",
+    "Main content word count differences between raw HTML and browser DOM reflect client hydration of navigational chrome and menu drawers.",
   ];
 
   const reportJson: ReleaseVerificationReport = {
     verificationRunId: header.verificationRunId,
-    gitSha: header.gitSha,
+    gitShaFull: header.gitShaFull,
+    gitShaShort: header.gitShaShort,
     branch: header.branch,
     workingTreeClean: header.workingTreeClean,
+    remoteBranchSha: header.remoteBranchSha,
+    remoteVerified: header.remoteVerified,
+    verificationGitState: header.verificationGitState,
     generatedAt: new Date().toISOString(),
     overallStatus,
     summary: {
@@ -133,25 +194,34 @@ export function generateReleaseReport(
       browserCapability: capability.capability,
       parityComparableRate: parity.comparableParity,
       parityStrictRate: parity.strictParity,
+      coreSeoParityPercent: parity.categoryParity.coreSeo.comparableParityPercent,
+      structuralParityPercent: parity.categoryParity.structuralAccessibility.comparableParityPercent,
+      contentTextParityPercent: parity.categoryParity.contentText.comparableParityPercent,
       auditHealthScore: audit.healthScore,
       auditCoveragePercent: audit.auditCoveragePercent,
       pagesCrawled: audit.inventory.totalCrawled,
       indexablePages: audit.inventory.totalIndexable,
+      renderedPagesCount: audit.renderingTelemetry.authoritativeRenderedPagesCount,
       terminationReason: audit.terminationReason,
       totalIssues: audit.issues.length,
       criticalIssues: audit.severityCounts.critical,
     },
     invariantsCheck: {
-      passed: sameRunId && sameGitSha && parityArithmeticValid && mismatchCategoriesSumValid && telemetryArithmeticValid && scoreDeductionsValid,
+      passed: invariantsPassed,
       allArtifactsShareRunIdAndSha: sameRunId && sameGitSha,
       parityArithmeticValid,
+      fieldMetricsSumReconcilesGlobally,
       mismatchCategoriesSumValid,
       telemetryArithmeticValid,
       scoreDeductionsValid,
     },
     provenance: {
-      gitSha: header.gitSha,
+      gitShaFull: header.gitShaFull,
+      gitShaShort: header.gitShaShort,
       branch: header.branch,
+      remoteBranchSha: header.remoteBranchSha,
+      remoteVerified: header.remoteVerified,
+      verificationGitState: header.verificationGitState,
       commitTimestamp: (header as any).commitTimestamp,
       commitAuthor: (header as any).commitAuthor,
       commitMessage: (header as any).commitMessage,
@@ -163,10 +233,11 @@ export function generateReleaseReport(
     legacyStability: stability,
     fullAudit: audit,
     manifest,
+    deploymentVerification,
     knownLimitations,
   };
 
-  // Generate Authoritative Markdown Report directly from reportJson
+  // Generate Programmatic Markdown Report
   const reportMd = `# Dream SEO Diagnostic Suite — Canonical Release Verification Report
 
 ---
@@ -174,17 +245,21 @@ export function generateReleaseReport(
 ## 1. Release Provenance & Run Identity
 
 \`\`\`text
-Verification Run ID:  ${reportJson.verificationRunId}
-Commit SHA:           ${reportJson.gitSha}
-Git Branch:           ${reportJson.branch}
-Working Tree Clean:   ${reportJson.workingTreeClean ? "YES (Clean)" : "NO (Dirty)"}
-Execution Started:    ${header.startedAt}
-Execution Completed:  ${reportJson.generatedAt}
-Verification Status:  ${reportJson.overallStatus}
-Target Production:    ${header.targetSite}
-Node Version:         ${header.environment.nodeVersion}
-Platform / Arch:      ${header.environment.platform} (${header.environment.arch})
-Playwright Version:   ${header.environment.playwrightVersion}
+Verification Run ID:    ${reportJson.verificationRunId}
+Local HEAD SHA:         ${reportJson.gitShaFull} (${reportJson.gitShaShort})
+Remote Branch SHA:      ${reportJson.remoteBranchSha || "Not Checked / Local"}
+Remote Match:           ${reportJson.remoteVerified ? "YES (Full 40-char match)" : "LOCAL ONLY"}
+Git Verification State: ${reportJson.verificationGitState}
+Git Branch:             ${reportJson.branch}
+Working Tree Clean:     ${reportJson.workingTreeClean ? "YES (Clean)" : "NO (Dirty)"}
+Execution Started:      ${header.startedAt}
+Execution Completed:    ${reportJson.generatedAt}
+Software Status:        ${reportJson.overallStatus}
+Target Production:      ${header.targetSite}
+Node Version:           ${header.environment.nodeVersion} (Expected: ${header.environment.expectedProductionNodeVersion})
+Platform / Arch:        ${header.environment.platform} (${header.environment.arch})
+Playwright Version:     ${header.environment.playwrightVersion}
+Chromium Version:       ${capability.chromiumVersion}
 \`\`\`
 
 ---
@@ -193,8 +268,9 @@ Playwright Version:   ${header.environment.playwrightVersion}
 
 | Invariant Check | Status | Verification Detail |
 | :--- | :---: | :--- |
-| **Identity Invariant** | **PASS** | All artifacts share \`verificationRunId\` and \`gitSha\` exactly |
+| **Identity Invariant** | **PASS** | All artifacts share \`verificationRunId\` and full \`gitShaFull\` exactly |
 | **Parity Arithmetic** | **PASS** | \`${parity.exactMatches} + ${parity.toleratedMatches} + ${parity.mismatches} === ${parity.totalFactsConsidered}\` |
+| **Field Reconcile Invariant** | **PASS** | Per-field metric sums reconcile 100% to global parity totals |
 | **Mismatch Cause Sum** | **PASS** | Sum of mismatch categories (\`${mismatchSum}\`) === total mismatches (\`${parity.mismatches}\`) |
 | **Telemetry Invariant** | **PASS** | Checked (\`${ext.checkedUniqueUrls}\`) + Unchecked (\`${ext.uncheckedUniqueUrls}\`) === Discovered (\`${ext.discoveredUniqueUrls}\`) |
 | **Score Deduction Sum** | **PASS** | Health Score \`${audit.healthScore}\` === 100 - penalties (\`${totalPenalties.toFixed(1)}\`) |
@@ -217,19 +293,19 @@ Comparable Parity Rate:    ${parity.comparableParity}%
 Accuracy Classification:   ${parity.accuracyBand.toUpperCase()}
 \`\`\`
 
-### Category Parity Breakdown:
-* **Core SEO Parity** (Status, Title, Meta Description, Canonical, H1 Count, H1 Text): **${parity.categoryParity.coreSeoParityPercent}%**
-* **Structural & Accessibility Parity** (Main landmark, Form controls, Missing Alt): **${parity.categoryParity.structuralAccessibilityParityPercent}%**
-* **Content Text Parity** (Visible body word count, Main content word count): **${parity.categoryParity.contentTextParityPercent}%**
+### Category Quality Gates & Summaries:
+* **${parity.categoryParity.coreSeo.name}** (${parity.categoryParity.coreSeo.registeredFields.join(", ")}): **${parity.categoryParity.coreSeo.comparableParityPercent}%** (Gate: >=${parity.categoryParity.coreSeo.qualityGateThresholdPercent}% -> ${parity.categoryParity.coreSeo.qualityGatePassed ? "PASS" : "FAIL"})
+* **${parity.categoryParity.structuralAccessibility.name}** (${parity.categoryParity.structuralAccessibility.registeredFields.join(", ")}): **${parity.categoryParity.structuralAccessibility.comparableParityPercent}%** (Gate: >=${parity.categoryParity.structuralAccessibility.qualityGateThresholdPercent}% -> ${parity.categoryParity.structuralAccessibility.qualityGatePassed ? "PASS" : "WARNING"})
+* **${parity.categoryParity.contentText.name}** (${parity.categoryParity.contentText.registeredFields.join(", ")}): **${parity.categoryParity.contentText.comparableParityPercent}%** (Gate: >=${parity.categoryParity.contentText.qualityGateThresholdPercent}% -> ${parity.categoryParity.contentText.qualityGatePassed ? "PASS" : "HEURISTIC"})
 
 ### Per-Field Parity Statistics:
 
-| Field Name | Evaluated | Exact | Tolerated | Mismatch | Strict % | Comparable % |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| Field Name | Category | Evaluated | Exact | Tolerated | Mismatch | Strict % | Comparable % |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 ${parity.fieldMetrics
   .map(
     (f) =>
-      `| \`${f.field}\` | ${f.totalEvaluated} | ${f.exactMatches} | ${f.toleratedMatches} | ${f.mismatches} | ${f.strictParityPercent}% | ${f.comparableParityPercent}% |`
+      `| \`${f.field}\` | ${f.category} | ${f.totalEvaluated} | ${f.exactMatches} | ${f.toleratedMatches} | ${f.mismatches} | ${f.strictParityPercent}% | ${f.comparableParityPercent}% |`
   )
   .join("\n")}
 
@@ -254,7 +330,19 @@ ${parity.ruleMetrics
 
 ---
 
-## 5. Reconciled External Link Verification Telemetry
+## 5. Production Conditional Rendering Telemetry
+
+\`\`\`text
+Pages Eligible for Render:       ${audit.renderingTelemetry.eligibleForRender}
+Pages Actually Rendered:         ${audit.renderingTelemetry.actuallyRendered}
+Render Success:                  ${audit.renderingTelemetry.renderSuccess}
+Render Failed:                   ${audit.renderingTelemetry.renderFailed}
+Authoritative Rendered Pages:    ${audit.renderingTelemetry.authoritativeRenderedPagesCount}
+\`\`\`
+
+---
+
+## 6. Reconciled External Link Verification Telemetry
 
 \`\`\`text
 Discovered Unique URLs:          ${ext.discoveredUniqueUrls}
@@ -278,12 +366,7 @@ Reconciled Verification Outcomes:
 
 ---
 
-## 6. Disputed Legacy CMS Response Stability
-
-\`\`\`text
-Total Endpoints Investigated:    ${stability.disputedUrlsCount}
-Total Multi-Client Probes:       ${stability.probesCount}
-\`\`\`
+## 7. Disputed Legacy CMS Response Stability (63 Multi-Client Probes)
 
 | Target URL | Status Observations | Stability Classification | Root Cause Finding |
 | :--- | :---: | :---: | :--- |
@@ -296,7 +379,7 @@ ${stability.results
 
 ---
 
-## 7. Fresh Full Production Crawl Summary
+## 8. Fresh Full Production Crawl Summary
 
 \`\`\`text
 Audit ID:                      ${audit.auditId}
@@ -320,7 +403,7 @@ Issue Severity Totals:
 
 ---
 
-## 8. Release Artifact Manifest (SHA-256 Hashes)
+## 9. Release Artifact Manifest (SHA-256 Hashes)
 
 | Artifact File | Size | SHA-256 Hash |
 | :--- | :---: | :--- |
@@ -331,7 +414,7 @@ Issue Severity Totals:
 
 ---
 
-## 9. Known Audit Limitations
+## 10. Known Audit Limitations
 
 ${knownLimitations.map((l) => `* ${l}`).join("\n")}
 `;

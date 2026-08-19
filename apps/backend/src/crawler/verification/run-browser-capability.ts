@@ -3,7 +3,7 @@ import type { BrowserCapabilityArtifact, VerificationEnvironment } from "./types
 
 export async function executeBrowserCapabilityCheck(
   verificationRunId: string,
-  gitSha: string,
+  gitShaFull: string,
   environment: VerificationEnvironment
 ): Promise<BrowserCapabilityArtifact> {
   console.log(`[Verify:Capability] Running browser capability verification...`);
@@ -11,15 +11,17 @@ export async function executeBrowserCapabilityCheck(
 
   const artifact: BrowserCapabilityArtifact = {
     verificationRunId,
-    gitSha,
+    gitShaFull,
     generatedAt: new Date().toISOString(),
     capability: result.capability,
     details: result.details,
-    launchSuccess: result.capability !== "unavailable",
-    navigationSmokeSuccess: result.capability === "available",
+    chromiumVersion: result.chromiumVersion || "unknown",
+    chromiumExecutableAvailable: result.chromiumExecutableAvailable,
+    browserLaunchSucceeded: result.browserLaunchSucceeded,
+    navigationSmokeSucceeded: result.navigationSmokeSucceeded,
     environment,
   };
 
-  console.log(`[Verify:Capability] Result: ${artifact.capability.toUpperCase()} (${artifact.details})`);
+  console.log(`[Verify:Capability] Result: ${artifact.capability.toUpperCase()} (Chromium: ${artifact.chromiumVersion}, ${artifact.details})`);
   return artifact;
 }

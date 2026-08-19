@@ -8,6 +8,7 @@ import { ReportGenerator } from "lighthouse/report/generator/report-generator.js
 import { analyzeSite, AnalysisTimeoutError, calculateWeightedScore } from "./analysis";
 import { runSiteAuditCrawl } from "./crawler/engine";
 import { checkBrowserCapability } from "./crawler/fetcher";
+import { getGitProvenance } from "./crawler/verification/git-info";
 import { normalizeAuditUrl } from "./storage/lighthouse-store";
 import { saveShareRecord, getShareRecord } from "./storage/share-store";
 import type { ExportPayload, ModuleSnapshot } from "./types";
@@ -494,19 +495,32 @@ app.get("/", (_req, res) => {
 });
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "seo-geo-analyzer-api", time: new Date().toISOString() });
+  const git = getGitProvenance();
+  res.json({
+    ok: true,
+    service: "seo-geo-analyzer-api",
+    gitSha: process.env.RENDER_GIT_COMMIT || git.gitShaFull,
+    nodeVersion: process.version,
+    platform: process.platform,
+    time: new Date().toISOString(),
+  });
 });
 
 app.get("/api/health/browser", async (_req, res) => {
   const capability = await checkBrowserCapability();
+  const git = getGitProvenance();
   return res.json({
     ok: capability.capability === "available",
     runtime: process.env.RENDER ? "render" : "local",
+    gitSha: process.env.RENDER_GIT_COMMIT || git.gitShaFull,
     nodeVersion: process.version,
     platform: process.platform,
     arch: process.arch,
     capability: capability.capability,
     details: capability.details,
+    chromiumVersion: capability.chromiumVersion,
+    browserLaunchSucceeded: capability.browserLaunchSucceeded,
+    navigationSmokeSucceeded: capability.navigationSmokeSucceeded,
     timestamp: new Date().toISOString(),
   });
 });

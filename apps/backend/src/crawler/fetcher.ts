@@ -150,21 +150,31 @@ class PlaywrightBrowserPool {
 
 export const sharedBrowserPool = new PlaywrightBrowserPool();
 
+export interface BrowserCapabilityCheckResult {
+  capability: BrowserVerificationCapability;
+  details: string;
+  chromiumVersion?: string;
+  chromiumExecutableAvailable: boolean;
+  browserLaunchSucceeded: boolean;
+  navigationSmokeSucceeded: boolean;
+}
+
 /**
  * Self-check diagnostic for browser verification capability.
  */
-export async function checkBrowserCapability(): Promise<{
-  capability: BrowserVerificationCapability;
-  details: string;
-}> {
+export async function checkBrowserCapability(): Promise<BrowserCapabilityCheckResult> {
   try {
     const browser = await sharedBrowserPool.getBrowser();
     if (!browser) {
       return {
         capability: "unavailable",
         details: "Playwright Chromium executable failed to launch",
+        chromiumExecutableAvailable: false,
+        browserLaunchSucceeded: false,
+        navigationSmokeSucceeded: false,
       };
     }
+    const version = browser.version ? browser.version() : "unknown";
     const page = await browser.newPage();
     await page.setContent("<html><body><p>Capability Test</p></body></html>");
     const text = await page.textContent("p");
@@ -174,16 +184,27 @@ export async function checkBrowserCapability(): Promise<{
       return {
         capability: "available",
         details: "Playwright Chromium operational and verified",
+        chromiumVersion: version,
+        chromiumExecutableAvailable: true,
+        browserLaunchSucceeded: true,
+        navigationSmokeSucceeded: true,
       };
     }
     return {
       capability: "degraded",
       details: "Browser initialized but evaluation returned unexpected result",
+      chromiumVersion: version,
+      chromiumExecutableAvailable: true,
+      browserLaunchSucceeded: true,
+      navigationSmokeSucceeded: false,
     };
   } catch (err: any) {
     return {
       capability: "unavailable",
       details: `Browser initialization failed: ${err.message}`,
+      chromiumExecutableAvailable: false,
+      browserLaunchSucceeded: false,
+      navigationSmokeSucceeded: false,
     };
   }
 }

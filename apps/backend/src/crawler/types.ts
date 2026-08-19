@@ -332,6 +332,57 @@ export interface LandmarkFacts {
   asideCount: number;
 }
 
+export interface RawPageFacts {
+  title: string | null;
+  metaDescription: string | null;
+  canonicalUrl: string | null;
+  h1Count: number;
+  h1Texts: string[];
+  formCount: number;
+  unlabelledFormControlCount: number;
+  missingAltCount: number;
+  rawDocumentWordCount: number;
+  visibleBodyWordCount: number;
+  mainContentWordCount: number;
+  hasMainLandmark: boolean;
+}
+
+export interface RenderedPageFacts {
+  attempted: boolean;
+  success: boolean;
+  renderedAt?: string;
+  renderReason?: string;
+  renderConfidence?: RenderConfidence;
+  title?: string | null;
+  metaDescription?: string | null;
+  canonicalUrl?: string | null;
+  h1Count?: number;
+  h1Texts?: string[];
+  formCount?: number;
+  unlabelledFormControlCount?: number;
+  missingAltCount?: number;
+  rawDocumentWordCount?: number;
+  visibleBodyWordCount?: number;
+  mainContentWordCount?: number;
+  hasMainLandmark?: boolean;
+}
+
+export interface AuthoritativePageFacts {
+  source: "raw" | "rendered";
+  title: string | null;
+  metaDescription: string | null;
+  canonicalUrl: string | null;
+  h1Count: number;
+  h1Texts: string[];
+  formCount: number;
+  unlabelledFormControlCount: number;
+  missingAltCount: number;
+  rawDocumentWordCount: number;
+  visibleBodyWordCount: number;
+  mainContentWordCount: number;
+  hasMainLandmark: boolean;
+}
+
 /**
  * Authoritative Single Page Fact Model
  */
@@ -350,6 +401,11 @@ export interface CrawledPageData {
   headers: Record<string, string | string[] | undefined>;
   crawledAt: string;
   sourceMode: "raw_http" | "rendered_playwright";
+
+  // Separate Evidence Fact Populations
+  rawFacts?: RawPageFacts;
+  renderedFacts?: RenderedPageFacts;
+  authoritativeFacts?: AuthoritativePageFacts;
 
   // Rendering & Completeness
   renderMode: RenderMode;

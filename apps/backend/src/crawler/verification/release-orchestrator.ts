@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { createRequire } from "module";
 import { execSync } from "child_process";
 import { getGitProvenance } from "./git-info";
 import { executeBrowserCapabilityCheck } from "./run-browser-capability";
@@ -10,29 +11,49 @@ import { executeFullAuditSuite } from "./run-audit-suite";
 import { generateReleaseReport } from "./report-generator";
 import type { VerificationEnvironment, VerificationRunHeader } from "./types";
 
+const require = createRequire(import.meta.url);
+
 async function main() {
   console.log("==========================================================================");
   console.log("    DREAM SEO ANALYZER — CANONICAL RELEASE VERIFICATION ORCHESTRATOR      ");
   console.log("==========================================================================\n");
 
-  // 1. Resolve Dynamic Git Metadata
-  const git = getGitProvenance(process.cwd());
+  const requireRemote = process.argv.includes("--require-remote");
+  const allowDirty = process.argv.includes("--allow-dirty");
+
+  // 1. Resolve Dynamic Git Metadata (Full 40-char SHA & optional remote verification)
+  const git = getGitProvenance(process.cwd(), requireRemote);
   const repoRoot = git.repositoryRoot || process.cwd();
   const cwd = path.resolve(repoRoot, "apps/backend");
 
-  console.log(`[Provenance] Commit SHA: ${git.gitSha} (${git.shortSha})`);
-  console.log(`[Provenance] Branch: ${git.branch}`);
+  console.log(`[Provenance] Local HEAD Full SHA: ${git.gitShaFull} (${git.gitShaShort})`);
+  console.log(`[Provenance] Branch:             ${git.branch}`);
   console.log(`[Provenance] Working Tree Clean: ${git.workingTreeClean ? "YES" : "NO"}`);
+  if (git.remoteBranchSha) {
+    console.log(`[Provenance] Remote Branch SHA:  ${git.remoteBranchSha}`);
+    console.log(`[Provenance] Remote Match:       ${git.remoteVerified ? "EXACT MATCH (40-char)" : "MISMATCH"}`);
+  }
+  console.log(`[Provenance] Verification State: ${git.verificationGitState}\n`);
 
-  const allowDirty = process.argv.includes("--allow-dirty");
   if (!git.workingTreeClean && !allowDirty) {
-    console.error("\n==========================================================================");
+    console.error("==========================================================================");
     console.error("  RELEASE VERIFICATION ABORTED");
     console.error("  Reason: working tree contains uncommitted changes");
     console.error("==========================================================================");
     console.error("Uncommitted changes detected:");
     git.uncommittedChanges.forEach((c) => console.error(`  - ${c}`));
     console.error("\nPlease commit all changes before running the release verification pipeline.");
+    process.exit(1);
+  }
+
+  if (requireRemote && !git.remoteVerified) {
+    console.error("==========================================================================");
+    console.error("  RELEASE VERIFICATION ABORTED");
+    console.error("  Reason: local HEAD SHA does not match remote branch SHA on origin");
+    console.error(`  Local:  ${git.gitShaFull}`);
+    console.error(`  Remote: ${git.remoteBranchSha || "Not found"}`);
+    console.error("==========================================================================");
+    console.error("\nPlease push your commit to origin before running with --require-remote.");
     process.exit(1);
   }
 
@@ -47,31 +68,39 @@ async function main() {
   fs.mkdirSync(runArtifactsDir, { recursive: true });
   fs.mkdirSync(latestArtifactsDir, { recursive: true });
 
-  let playwrightPkg = "1.58.0";
+  // 3. Resolve Exact Playwright Version (No fake fallback)
+  let playwrightVersion = "unknown";
   try {
-    const rootPkg = path.resolve(repoRoot, "node_modules/playwright/package.json");
-    const backendPkg = path.resolve(cwd, "node_modules/playwright/package.json");
-    if (fs.existsSync(rootPkg)) {
-      playwrightPkg = JSON.parse(fs.readFileSync(rootPkg, "utf8")).version || playwrightPkg;
-    } else if (fs.existsSync(backendPkg)) {
-      playwrightPkg = JSON.parse(fs.readFileSync(backendPkg, "utf8")).version || playwrightPkg;
+    const pkg = require("playwright/package.json");
+    if (pkg && pkg.version) {
+      playwrightVersion = pkg.version;
     }
   } catch {}
 
+  const expectedNode = "22";
+  const currentMajor = process.versions.node.split(".")[0];
+  const nodeMatches = currentMajor === expectedNode;
+
   const environment: VerificationEnvironment = {
     nodeVersion: process.version,
+    expectedProductionNodeVersion: expectedNode,
+    nodeVersionMatchesExpected: nodeMatches,
     platform: process.platform,
     arch: process.arch,
     osRelease: os.release(),
-    playwrightVersion: playwrightPkg,
+    playwrightVersion,
     isRender: Boolean(process.env.RENDER),
   };
 
   const header: VerificationRunHeader = {
     verificationRunId,
-    gitSha: git.gitSha,
+    gitShaFull: git.gitShaFull,
+    gitShaShort: git.gitShaShort,
     branch: git.branch,
     workingTreeClean: git.workingTreeClean,
+    remoteBranchSha: git.remoteBranchSha,
+    remoteVerified: git.remoteVerified,
+    verificationGitState: git.verificationGitState,
     targetSite: "https://www.botconsulting.io/",
     startedAt,
     environment,
@@ -92,7 +121,7 @@ async function main() {
 
   // Step 2: Browser Capability Check
   console.log("--- Step 2/7: Browser Verification Capability Check ---");
-  const capabilityArtifact = await executeBrowserCapabilityCheck(verificationRunId, git.gitSha, environment);
+  const capabilityArtifact = await executeBrowserCapabilityCheck(verificationRunId, git.gitShaFull, environment);
   if (capabilityArtifact.capability === "unavailable") {
     console.error("FAIL: Headless browser is unavailable.");
     process.exit(1);
@@ -104,7 +133,8 @@ async function main() {
   try {
     execSync("npx tsx src/crawler/__tests__/verify-correctness.ts", { cwd, stdio: "inherit" });
     execSync("npx tsx src/crawler/__tests__/golden-dataset.test.ts", { cwd, stdio: "inherit" });
-    console.log("✓ Deterministic unit & golden dataset regression passed.\n");
+    execSync("npx tsx src/crawler/verification/__tests__/release-harness-invariants.test.ts", { cwd, stdio: "inherit" });
+    console.log("✓ Deterministic unit, golden dataset, and release harness regression passed.\n");
   } catch (err: any) {
     console.error(`FAIL: Regression suite failed: ${err.message}`);
     process.exit(1);
@@ -122,17 +152,17 @@ async function main() {
 
   // Step 5: Legacy CMS Response Stability Multi-Probe
   console.log("--- Step 5/7: Disputed Legacy CMS Response Stability Diagnostics ---");
-  const stabilityArtifact = await executeLegacyStabilityCheck(verificationRunId, git.gitSha);
+  const stabilityArtifact = await executeLegacyStabilityCheck(verificationRunId, git.gitShaFull);
   console.log("✓ Legacy CMS stability diagnostics completed.\n");
 
-  // Step 6: Independent 25-URL Playwright Browser Parity
+  // Step 6: Independent 25-URL Playwright Browser Parity (275 Facts Total)
   console.log("--- Step 6/7: Independent 25-URL Playwright Browser Parity Oracle ---");
-  const parityArtifact = await executeParitySuite(verificationRunId, git.gitSha);
+  const parityArtifact = await executeParitySuite(verificationRunId, git.gitShaFull);
   console.log("✓ Independent Playwright parity suite completed.\n");
 
   // Step 7: Fresh Comprehensive Site Audit
   console.log("--- Step 7/7: Fresh Full Production BOT Audit Crawl (maxPages=300) ---");
-  const auditArtifact = await executeFullAuditSuite(verificationRunId, git.gitSha);
+  const auditArtifact = await executeFullAuditSuite(verificationRunId, git.gitShaFull);
   console.log("✓ Full site audit completed.\n");
 
   // Compile Final Report & Cross-Artifact Validation

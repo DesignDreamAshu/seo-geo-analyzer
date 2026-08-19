@@ -1,5 +1,4 @@
 import axios from "axios";
-import crypto from "crypto";
 import { chromium } from "playwright";
 import { fetchPageHtml } from "../fetcher";
 import type { DisputedUrlStabilityProbe, LegacyStabilityArtifact } from "./types";
@@ -16,7 +15,7 @@ const DISPUTED_URLS = [
 
 export async function executeLegacyStabilityCheck(
   verificationRunId: string,
-  gitSha: string
+  gitShaFull: string
 ): Promise<LegacyStabilityArtifact> {
   console.log(`[Verify:Stability] Investigating ${DISPUTED_URLS.length} disputed CMS endpoints across 3 probe cycles...`);
 
@@ -108,7 +107,7 @@ export async function executeLegacyStabilityCheck(
 
   const artifact: LegacyStabilityArtifact = {
     verificationRunId,
-    gitSha,
+    gitShaFull,
     generatedAt: new Date().toISOString(),
     probesCount: DISPUTED_URLS.length * (browser ? 9 : 6),
     disputedUrlsCount: DISPUTED_URLS.length,

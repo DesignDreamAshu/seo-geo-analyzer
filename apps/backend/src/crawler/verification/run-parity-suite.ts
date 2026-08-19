@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import axios from "axios";
 import { parseHtmlPage } from "../parser";
 import { normalizeUrl } from "../normalizer";
-import type { FieldParityStat, ParityArtifact, RuleAccuracyMetric } from "./types";
+import type { FieldParityStat, ParityArtifact, ParityCategorySummary, RuleAccuracyMetric } from "./types";
 
 interface CrawlerFactModel {
   requestedUrl: string;
@@ -87,6 +87,26 @@ const TEST_URLS = [
   "https://www.botconsulting.io/sitemap.xml",
   "https://www.botconsulting.io/cdn-cgi/l/email-protection",
   "https://www.botconsulting.io/terms-of-service",
+];
+
+const CORE_SEO_FIELDS = [
+  "status_code",
+  "title",
+  "meta_description",
+  "canonical_url",
+  "h1_count",
+  "primary_h1_text",
+];
+
+const STRUCTURAL_A11Y_FIELDS = [
+  "has_main_landmark",
+  "form_count",
+  "missing_alt_count",
+];
+
+const CONTENT_TEXT_FIELDS = [
+  "visible_body_word_count",
+  "main_content_word_count",
 ];
 
 async function extractCrawlerFacts(url: string): Promise<CrawlerFactModel> {
@@ -311,7 +331,7 @@ function compareFacts(crawler: CrawlerFactModel, browser: BrowserOracleFactModel
     crawlerValue: crawler.status,
     browserValue: browser.navigationStatus,
     status: crawler.status === browser.navigationStatus ? "EXACT_MATCH" : "MISMATCH",
-    mismatchReason: crawler.status !== browser.navigationStatus ? "Navigation status code difference" : undefined,
+    mismatchReason: crawler.status !== browser.navigationStatus ? "Navigation status code difference between HTTP fetch and browser navigation" : undefined,
   });
 
   comparisons.push({
@@ -320,7 +340,7 @@ function compareFacts(crawler: CrawlerFactModel, browser: BrowserOracleFactModel
     crawlerValue: crawler.title,
     browserValue: browser.title,
     status: crawler.title === browser.title ? "EXACT_MATCH" : "MISMATCH",
-    mismatchReason: crawler.title !== browser.title ? "Title tag text difference" : undefined,
+    mismatchReason: crawler.title !== browser.title ? "Document <title> text difference between raw HTML and browser DOM" : undefined,
   });
 
   comparisons.push({
@@ -329,7 +349,7 @@ function compareFacts(crawler: CrawlerFactModel, browser: BrowserOracleFactModel
     crawlerValue: crawler.metaDescription,
     browserValue: browser.metaDescription,
     status: crawler.metaDescription === browser.metaDescription ? "EXACT_MATCH" : "MISMATCH",
-    mismatchReason: crawler.metaDescription !== browser.metaDescription ? "Meta description content difference" : undefined,
+    mismatchReason: crawler.metaDescription !== browser.metaDescription ? "Meta description content difference between raw HTML and browser DOM" : undefined,
   });
 
   const cCanon = crawler.canonical?.replace(/\/$/, "") || null;
@@ -345,7 +365,7 @@ function compareFacts(crawler: CrawlerFactModel, browser: BrowserOracleFactModel
         : cCanon === bCanon
         ? "TOLERATED_MATCH"
         : "MISMATCH",
-    mismatchReason: cCanon !== bCanon ? "Canonical link URL difference" : undefined,
+    mismatchReason: cCanon !== bCanon ? "Canonical link URL difference between raw HTML and browser DOM" : undefined,
   });
 
   comparisons.push({
@@ -354,7 +374,7 @@ function compareFacts(crawler: CrawlerFactModel, browser: BrowserOracleFactModel
     crawlerValue: crawler.h1Count,
     browserValue: browser.h1Count,
     status: crawler.h1Count === browser.h1Count ? "EXACT_MATCH" : "MISMATCH",
-    mismatchReason: crawler.h1Count !== browser.h1Count ? "H1 tag count difference" : undefined,
+    mismatchReason: crawler.h1Count !== browser.h1Count ? "H1 tag count difference between raw HTML and browser DOM" : undefined,
   });
 
   const cH1 = crawler.h1Texts[0] || null;
@@ -375,7 +395,7 @@ function compareFacts(crawler: CrawlerFactModel, browser: BrowserOracleFactModel
     crawlerValue: crawler.hasMain,
     browserValue: browser.hasMain,
     status: crawler.hasMain === browser.hasMain ? "EXACT_MATCH" : "MISMATCH",
-    mismatchReason: crawler.hasMain !== browser.hasMain ? "Main semantic landmark difference" : undefined,
+    mismatchReason: crawler.hasMain !== browser.hasMain ? "Main semantic landmark difference between raw HTML and browser DOM" : undefined,
   });
 
   comparisons.push({
@@ -393,28 +413,48 @@ function compareFacts(crawler: CrawlerFactModel, browser: BrowserOracleFactModel
     crawlerValue: crawler.missingAltCount,
     browserValue: browser.missingAltCount,
     status: crawler.missingAltCount === browser.missingAltCount ? "EXACT_MATCH" : "MISMATCH",
-    mismatchReason: crawler.missingAltCount !== browser.missingAltCount ? "Images missing alt count difference" : undefined,
+    mismatchReason: crawler.missingAltCount !== browser.missingAltCount ? "Images missing alt attribute count difference" : undefined,
   });
 
-  // Content Text (1 fact)
-  const cWords = crawler.visibleBodyWordCount || crawler.wordCount;
-  const bWords = browser.visibleBodyWordCount || browser.wordCount;
-  const wordDiff = Math.abs(cWords - bWords);
-  const maxWords = Math.max(1, cWords, bWords);
-  const wordDiffPct = wordDiff / maxWords;
+  // Content Text (2 facts: visible_body_word_count and main_content_word_count)
+  const cVisWords = crawler.visibleBodyWordCount || crawler.wordCount;
+  const bVisWords = browser.visibleBodyWordCount || browser.wordCount;
+  const visWordDiff = Math.abs(cVisWords - bVisWords);
+  const maxVisWords = Math.max(1, cVisWords, bVisWords);
+  const visWordDiffPct = visWordDiff / maxVisWords;
 
   comparisons.push({
     field: "visible_body_word_count",
     category: "content_text",
-    crawlerValue: cWords,
-    browserValue: bWords,
+    crawlerValue: cVisWords,
+    browserValue: bVisWords,
     status:
-      cWords === bWords
+      cVisWords === bVisWords
         ? "EXACT_MATCH"
-        : wordDiffPct <= 0.2
+        : visWordDiffPct <= 0.2
         ? "TOLERATED_MATCH"
         : "MISMATCH",
-    mismatchReason: wordDiffPct > 0.2 ? "Client JS navigation/menu hydration word variance" : undefined,
+    mismatchReason: visWordDiffPct > 0.2 ? "Client JS navigation/menu hydration word variance" : undefined,
+  });
+
+  const cMainWords = crawler.mainContentWordCount || crawler.wordCount;
+  const bMainWords = browser.mainContentWordCount || browser.wordCount;
+  const mainWordDiff = Math.abs(cMainWords - bMainWords);
+  const maxMainWords = Math.max(1, cMainWords, bMainWords);
+  const mainWordDiffPct = mainWordDiff / maxMainWords;
+
+  comparisons.push({
+    field: "main_content_word_count",
+    category: "content_text",
+    crawlerValue: cMainWords,
+    browserValue: bMainWords,
+    status:
+      cMainWords === bMainWords
+        ? "EXACT_MATCH"
+        : mainWordDiffPct <= 0.2
+        ? "TOLERATED_MATCH"
+        : "MISMATCH",
+    mismatchReason: mainWordDiffPct > 0.2 ? "Client JS main content container hydration variance" : undefined,
   });
 
   return comparisons;
@@ -422,21 +462,17 @@ function compareFacts(crawler: CrawlerFactModel, browser: BrowserOracleFactModel
 
 export async function executeParitySuite(
   verificationRunId: string,
-  gitSha: string
+  gitShaFull: string
 ): Promise<ParityArtifact> {
-  console.log(`[Verify:Parity] Running independent 25-URL Playwright browser parity extraction...`);
+  console.log(`[Verify:Parity] Running independent 25-URL Playwright browser parity extraction (11 facts/url = 275 facts total)...`);
 
   const browser = await chromium.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });
 
-  const fieldAccumulator = new Map<string, { exact: number; tolerated: number; mismatch: number; total: number }>();
+  const fieldAccumulator = new Map<string, { field: string; category: "core_seo" | "structural_a11y" | "content_text"; exact: number; tolerated: number; mismatch: number; total: number }>();
   const mismatchCategoryCounts: Record<string, number> = {};
-
-  let coreSeoExact = 0, coreSeoTol = 0, coreSeoTotal = 0;
-  let structuralExact = 0, structuralTol = 0, structuralTotal = 0;
-  let contentExact = 0, contentTol = 0, contentTotal = 0;
 
   let totalExact = 0, totalTolerated = 0, totalMismatch = 0;
   const urlSummaries: any[] = [];
@@ -458,32 +494,32 @@ export async function executeParitySuite(
     let urlExact = 0, urlTolerated = 0, urlMismatch = 0;
 
     for (const comp of comparisons) {
-      const fieldEntry = fieldAccumulator.get(comp.field) || { exact: 0, tolerated: 0, mismatch: 0, total: 0 };
+      const fieldEntry = fieldAccumulator.get(comp.field) || {
+        field: comp.field,
+        category: comp.category,
+        exact: 0,
+        tolerated: 0,
+        mismatch: 0,
+        total: 0,
+      };
       fieldEntry.total++;
 
       if (comp.status === "EXACT_MATCH") {
         totalExact++;
         urlExact++;
         fieldEntry.exact++;
-        if (comp.category === "core_seo") { coreSeoExact++; coreSeoTotal++; }
-        else if (comp.category === "structural_a11y") { structuralExact++; structuralTotal++; }
-        else if (comp.category === "content_text") { contentExact++; contentTotal++; }
       } else if (comp.status === "TOLERATED_MATCH") {
         totalTolerated++;
         urlTolerated++;
         fieldEntry.tolerated++;
-        if (comp.category === "core_seo") { coreSeoTol++; coreSeoTotal++; }
-        else if (comp.category === "structural_a11y") { structuralTol++; structuralTotal++; }
-        else if (comp.category === "content_text") { contentTol++; contentTotal++; }
       } else if (comp.status === "MISMATCH") {
         totalMismatch++;
         urlMismatch++;
         fieldEntry.mismatch++;
-        const reason = comp.mismatchReason || "Unclassified Mismatch";
-        mismatchCategoryCounts[reason] = (mismatchCategoryCounts[reason] || 0) + 1;
-        if (comp.category === "core_seo") coreSeoTotal++;
-        else if (comp.category === "structural_a11y") structuralTotal++;
-        else if (comp.category === "content_text") contentTotal++;
+        if (!comp.mismatchReason) {
+          throw new Error(`PARITY FAILURE: Mismatch for URL [${url}] on field [${comp.field}] lacks a defined mismatchReason!`);
+        }
+        mismatchCategoryCounts[comp.mismatchReason] = (mismatchCategoryCounts[comp.mismatchReason] || 0) + 1;
       }
 
       fieldAccumulator.set(comp.field, fieldEntry);
@@ -531,23 +567,21 @@ export async function executeParitySuite(
 
   const totalFactsConsidered = totalExact + totalTolerated + totalMismatch;
 
-  // Invariant validation
-  const sumMismatchCategories = Object.values(mismatchCategoryCounts).reduce((a, b) => a + b, 0);
-  if (sumMismatchCategories !== totalMismatch) {
-    throw new Error(
-      `PARITY INVARIANT ERROR: sum(mismatchCategoryCounts) [${sumMismatchCategories}] !== totalMismatch [${totalMismatch}]`
-    );
-  }
+  // Strict Field Metrics Invariant Reconciliation
+  let sumFieldExact = 0;
+  let sumFieldTol = 0;
+  let sumFieldMismatch = 0;
+  let sumFieldTotal = 0;
 
-  const strictParity = Number(((totalExact / totalFactsConsidered) * 100).toFixed(1));
-  const comparableParity = Number((((totalExact + totalTolerated) / totalFactsConsidered) * 100).toFixed(1));
+  const fieldMetrics: FieldParityStat[] = Array.from(fieldAccumulator.values()).map((stats) => {
+    sumFieldExact += stats.exact;
+    sumFieldTol += stats.tolerated;
+    sumFieldMismatch += stats.mismatch;
+    sumFieldTotal += stats.total;
 
-  const accuracyBand =
-    comparableParity >= 90 ? "excellent" : comparableParity >= 75 ? "good" : "needs_review";
-
-  const fieldMetrics: FieldParityStat[] = Array.from(fieldAccumulator.entries()).map(
-    ([field, stats]) => ({
-      field,
+    return {
+      field: stats.field,
+      category: stats.category,
       totalEvaluated: stats.total,
       exactMatches: stats.exact,
       toleratedMatches: stats.tolerated,
@@ -556,8 +590,67 @@ export async function executeParitySuite(
       notEvaluated: 0,
       strictParityPercent: Number(((stats.exact / stats.total) * 100).toFixed(1)),
       comparableParityPercent: Number((((stats.exact + stats.tolerated) / stats.total) * 100).toFixed(1)),
-    })
-  );
+    };
+  });
+
+  if (sumFieldExact !== totalExact) {
+    throw new Error(`PARITY INVARIANT ERROR: sum(fieldMetrics.exact) [${sumFieldExact}] !== totalExact [${totalExact}]`);
+  }
+  if (sumFieldTol !== totalTolerated) {
+    throw new Error(`PARITY INVARIANT ERROR: sum(fieldMetrics.tolerated) [${sumFieldTol}] !== totalTolerated [${totalTolerated}]`);
+  }
+  if (sumFieldMismatch !== totalMismatch) {
+    throw new Error(`PARITY INVARIANT ERROR: sum(fieldMetrics.mismatch) [${sumFieldMismatch}] !== totalMismatch [${totalMismatch}]`);
+  }
+  if (sumFieldTotal !== totalFactsConsidered) {
+    throw new Error(`PARITY INVARIANT ERROR: sum(fieldMetrics.total) [${sumFieldTotal}] !== totalFactsConsidered [${totalFactsConsidered}]`);
+  }
+
+  // Mismatch category sum invariant
+  const sumMismatchCategories = Object.values(mismatchCategoryCounts).reduce((a, b) => a + b, 0);
+  if (sumMismatchCategories !== totalMismatch) {
+    throw new Error(
+      `PARITY INVARIANT ERROR: sum(mismatchCategoryCounts) [${sumMismatchCategories}] !== totalMismatch [${totalMismatch}]`
+    );
+  }
+
+  // Build Dynamic Category Summaries from Registered Field Lists
+  function buildCategorySummary(name: string, registeredFields: string[], thresholdPercent: number): ParityCategorySummary {
+    let catExact = 0, catTol = 0, catMis = 0, catTotal = 0;
+    for (const field of registeredFields) {
+      const stats = fieldAccumulator.get(field);
+      if (stats) {
+        catExact += stats.exact;
+        catTol += stats.tolerated;
+        catMis += stats.mismatch;
+        catTotal += stats.total;
+      }
+    }
+    const strictParityPercent = Number(((catExact / Math.max(1, catTotal)) * 100).toFixed(1));
+    const comparableParityPercent = Number((((catExact + catTol) / Math.max(1, catTotal)) * 100).toFixed(1));
+    return {
+      name,
+      registeredFields,
+      totalEvaluated: catTotal,
+      exactMatches: catExact,
+      toleratedMatches: catTol,
+      mismatches: catMis,
+      strictParityPercent,
+      comparableParityPercent,
+      qualityGatePassed: comparableParityPercent >= thresholdPercent,
+      qualityGateThresholdPercent: thresholdPercent,
+    };
+  }
+
+  const coreSeoSummary = buildCategorySummary("Core SEO", CORE_SEO_FIELDS, 98.0);
+  const structuralA11ySummary = buildCategorySummary("Structural & Accessibility", STRUCTURAL_A11Y_FIELDS, 80.0);
+  const contentTextSummary = buildCategorySummary("Content Text", CONTENT_TEXT_FIELDS, 20.0);
+
+  const strictParity = Number(((totalExact / totalFactsConsidered) * 100).toFixed(1));
+  const comparableParity = Number((((totalExact + totalTolerated) / totalFactsConsidered) * 100).toFixed(1));
+
+  const accuracyBand =
+    coreSeoSummary.qualityGatePassed && comparableParity >= 80 ? "good" : "needs_review";
 
   const ruleMetrics: RuleAccuracyMetric[] = [
     {
@@ -600,7 +693,7 @@ export async function executeParitySuite(
 
   const artifact: ParityArtifact = {
     verificationRunId,
-    gitSha,
+    gitShaFull,
     generatedAt: new Date().toISOString(),
     targetUrlsCount: TEST_URLS.length,
     totalFactsConsidered,
@@ -613,11 +706,9 @@ export async function executeParitySuite(
     comparableParity,
     accuracyBand,
     categoryParity: {
-      coreSeoParityPercent: Number((((coreSeoExact + coreSeoTol) / Math.max(1, coreSeoTotal)) * 100).toFixed(1)),
-      structuralAccessibilityParityPercent: Number(
-        (((structuralExact + structuralTol) / Math.max(1, structuralTotal)) * 100).toFixed(1)
-      ),
-      contentTextParityPercent: Number((((contentExact + contentTol) / Math.max(1, contentTotal)) * 100).toFixed(1)),
+      coreSeo: coreSeoSummary,
+      structuralAccessibility: structuralA11ySummary,
+      contentText: contentTextSummary,
     },
     mismatchCategories: mismatchCategoryCounts,
     fieldMetrics,

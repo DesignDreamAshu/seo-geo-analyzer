@@ -747,6 +747,41 @@ export function parseHtmlPage(
     crawledAt: new Date().toISOString(),
     sourceMode: "raw_http",
 
+    // Evidence Fact Populations
+    rawFacts: {
+      title,
+      metaDescription,
+      canonicalUrl: normalizedCanonical,
+      h1Count: headingResult.h1s.length,
+      h1Texts: headingResult.h1s,
+      formCount: forms.length,
+      unlabelledFormControlCount: forms.reduce((sum, f) => sum + f.unlabelledCount, 0),
+      missingAltCount: images.filter((img) => !img.hasAltAttribute).length,
+      rawDocumentWordCount,
+      visibleBodyWordCount,
+      mainContentWordCount,
+      hasMainLandmark: landmarks.hasMain,
+    },
+    renderedFacts: {
+      attempted: false,
+      success: false,
+    },
+    authoritativeFacts: {
+      source: "raw",
+      title: renderedTitle || title,
+      metaDescription,
+      canonicalUrl: normalizedCanonical,
+      h1Count: h1Tags.length,
+      h1Texts: h1Tags,
+      formCount: forms.length,
+      unlabelledFormControlCount: forms.reduce((sum, f) => sum + f.unlabelledCount, 0),
+      missingAltCount: images.filter((img) => !img.hasAltAttribute).length,
+      rawDocumentWordCount,
+      visibleBodyWordCount,
+      mainContentWordCount,
+      hasMainLandmark: landmarks.hasMain,
+    },
+
     // Rendering Facts
     renderMode,
     renderReason,
