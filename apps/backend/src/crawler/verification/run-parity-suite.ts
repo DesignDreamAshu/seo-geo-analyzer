@@ -968,9 +968,7 @@ export async function executeParitySuite(
       (browserFacts.mainContentWordCount || 0) < 180;
     const oracleShouldEmitUnlabelled =
       isHtml &&
-      (authResult.renderDecisionSample.attempted
-        ? browserFacts.unlabelledFormControlCount > 0
-        : (authResult.pageData.forms.reduce((sum, f) => sum + f.unlabelledCount, 0) > 0));
+      (authResult.pageData.forms.some((f) => f.unlabelledCount > 0));
 
     function recordRuleOutcome(
       tracker: RuleTracker,
