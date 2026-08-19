@@ -262,7 +262,8 @@ export function classifyBrowserPageState(
     titleLower.includes("404 - ") ||
     titleLower.startsWith("error 404") ||
     titleLower === "404" ||
-    titleLower.startsWith("404 error");
+    titleLower.startsWith("404 error") ||
+    (navStatus === 404 && wordCount < 30);
 
   const hasExplicitNotFoundHeading = headings.some((h) => {
     const hl = h.toLowerCase().trim();

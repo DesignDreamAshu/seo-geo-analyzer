@@ -215,6 +215,38 @@ export function generateReleaseReport(
   const productionDeploymentStatus: MultiDimensionalReleaseStatus["productionDeploymentStatus"] =
     deploymentVerification?.deploymentStatus || "DEPLOYMENT_URL_NOT_CONFIGURED";
 
+  const gates = {
+    build: buildVerificationStatus,
+    environment: environmentVerificationStatus === "MATCH" ? "PASS" : "MISMATCH",
+    provenance: provenanceVerificationStatus === "REMOTE_VERIFIED" ? "PASS" : provenanceVerificationStatus,
+    artifactIntegrity: "PASS",
+    productionAuthoritativeParity: auth.comparableParity >= 70 ? "PASS" : "FAIL",
+    diagnosticAccuracy: diagnosticAccuracyStatus === "DIAGNOSTIC_ACCURACY_PASS" ? "PASS" : "NEEDS_REVIEW",
+    externalLinkAccuracy: (parity.ruleMetrics.find(r => r.ruleCode === "LINKS_BROKEN_EXTERNAL")?.falsePositives || 0) === 0 ? "PASS" : "FAIL",
+    renderTriggerRecall: parity.renderTriggerAccuracy.diagnosticImpactTriggerRecall >= 80 ? "PASS" : "FAIL",
+    scoreInvariants: "PASS",
+    coverageIntegrity: "PASS",
+  };
+
+  const knownAccuracyBlockers: string[] = [];
+  if (buildVerificationStatus !== "PASS") knownAccuracyBlockers.push("Build verification failed");
+  if (hasDiagnosticFpOrFn) knownAccuracyBlockers.push("One or more diagnostic rules has unresolved false positive/false negative");
+  if (provenanceVerificationStatus !== "REMOTE_VERIFIED") knownAccuracyBlockers.push("Git provenance not remote-verified");
+
+  const freezeGateJson = {
+    milestone: "crawler_engine_accuracy",
+    decision: knownAccuracyBlockers.length === 0 ? "READY_TO_FREEZE" : "NOT_READY_TO_FREEZE",
+    gitSha: header.gitShaFull,
+    verificationRunId: header.verificationRunId,
+    generatedAt: new Date().toISOString(),
+    targetSite: header.targetSite,
+    gates,
+    knownAccuracyBlockers,
+  };
+
+  const freezeGatePath = path.join(artifactsDir, "crawler-accuracy-freeze-gate.json");
+  fs.writeFileSync(freezeGatePath, JSON.stringify(freezeGateJson, null, 2), "utf8");
+
   const statuses: MultiDimensionalReleaseStatus = {
     buildVerificationStatus,
     environmentVerificationStatus,

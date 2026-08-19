@@ -206,6 +206,7 @@ async function main() {
   fs.copyFileSync(path.join(runArtifactsDir, "parity.json"), path.join(latestArtifactsDir, "parity.json"));
   fs.copyFileSync(path.join(runArtifactsDir, "audit.json"), path.join(latestArtifactsDir, "audit.json"));
   fs.copyFileSync(path.join(runArtifactsDir, "manifest.json"), path.join(latestArtifactsDir, "manifest.json"));
+  fs.copyFileSync(path.join(runArtifactsDir, "crawler-accuracy-freeze-gate.json"), path.join(latestArtifactsDir, "crawler-accuracy-freeze-gate.json"));
   fs.copyFileSync(reportJsonPath, path.join(latestArtifactsDir, "release-verification-report.json"));
   fs.copyFileSync(reportMdPath, path.join(latestArtifactsDir, "release-verification-report.md"));
 
