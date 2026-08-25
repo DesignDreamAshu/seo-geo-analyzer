@@ -159,6 +159,8 @@ export async function runSiteAuditCrawl(options: CrawlOptions): Promise<CrawlAud
                 }
               }
             }
+            // Deterministic crawl ordering: BFS depth followed by alphabetical normalizedUrl
+            queue.sort((a, b) => a.depth - b.depth || a.normalizedUrl.localeCompare(b.normalizedUrl));
           }
         } catch (pageErr) {
           console.warn(`[Crawler] Warning: Failed to crawl page ${item.url}:`, (pageErr as Error).message);
@@ -172,7 +174,7 @@ export async function runSiteAuditCrawl(options: CrawlOptions): Promise<CrawlAud
             statusCode: 0,
             redirectHops: [],
             contentType: "text/html",
-            resourceType: "html_page",
+            resourceType: "error",
             responseTimeMs: 0,
             depth: item.depth,
             html: "",
@@ -183,7 +185,7 @@ export async function runSiteAuditCrawl(options: CrawlOptions): Promise<CrawlAud
             // Rendering facts
             renderMode: "raw",
             renderReason: "fetch_error",
-            renderConfidence: "high",
+            renderConfidence: "manual_review",
             rawWordCount: 0,
             rawDocumentWordCount: 0,
             visibleBodyWordCount: 0,
@@ -205,7 +207,7 @@ export async function runSiteAuditCrawl(options: CrawlOptions): Promise<CrawlAud
             metaRobots: null,
             xRobotsTag: null,
             isIndexable: false,
-            indexabilityStatus: "technically_non_indexable",
+            indexabilityStatus: "unknown_manual_review",
             h1s: [],
             h1Count: 0,
             h1Tags: [],
@@ -221,8 +223,22 @@ export async function runSiteAuditCrawl(options: CrawlOptions): Promise<CrawlAud
             images: [],
             resources: [],
             outlinks: [],
-            openGraph: {},
-            twitterCard: {},
+            openGraph: {
+              rawTags: [],
+              missingRequiredTags: [],
+              duplicateTags: [],
+              emptyTags: [],
+              imageFetchState: "FETCH_NOT_EVALUATED",
+              canonicalConsistent: true,
+              validationStatus: "NOT_EVALUATED",
+            },
+            twitterCard: {
+              rawTags: [],
+              missingTags: [],
+              hasExplicitCard: false,
+              hasOgFallback: false,
+              validationStatus: "NOT_EVALUATED",
+            },
             schemaJsonLd: [],
             classification: { primaryClass: "error", confidence: 1.0, signals: ["crawl_fetch_error"] },
           });
@@ -240,20 +256,29 @@ export async function runSiteAuditCrawl(options: CrawlOptions): Promise<CrawlAud
     );
   }
 
-  let terminationReason: CrawlTerminationReason = "queue_exhausted";
+  let terminationReason: CrawlTerminationReason = "QUEUE_EXHAUSTED";
   if (crawledMap.size >= maxPages) {
-    terminationReason = "max_pages_reached";
+    terminationReason = "MAX_PAGES_REACHED";
   } else if (options.signal?.aborted) {
-    terminationReason = "cancelled";
+    terminationReason = "MANUAL_CANCEL";
   }
 
-  const crawledPages = Array.from(crawledMap.values());
+  const isGraphDiscoveryComplete: boolean = (terminationReason as string) === "QUEUE_EXHAUSTED" || (terminationReason as string) === "CRAWL_COMPLETE";
+
+  const crawledPages = Array.from(crawledMap.values()).sort((a, b) =>
+    (a.normalizedUrl || a.url).localeCompare(b.normalizedUrl || b.url)
+  );
   console.log(`\n[Crawler] Crawl phase finished. Total pages retrieved: ${crawledPages.length} | Termination Reason: ${terminationReason}`);
 
   // 4. Build Link Graph & Analyze Inlinks / Outlinks / Sitemap Orphans
   reportProgress({ status: "analyzing_graph", percent: 85 });
-  const graphAnalysis = await buildAndAnalyzeGraph(crawledPages, sitemapResult.urls, options.signal);
-  console.log(`[Crawler] Graph built: ${graphAnalysis.totalInternalLinks} internal links, ${graphAnalysis.totalExternalLinks} external links, ${graphAnalysis.sitemapOrphans.length} sitemap orphans`);
+  const graphAnalysis = await buildAndAnalyzeGraph(
+    crawledPages,
+    sitemapResult.urls,
+    options.signal,
+    { isGraphDiscoveryComplete }
+  );
+  console.log(`[Crawler] Graph built: ${graphAnalysis.totalInternalLinks} internal links, ${graphAnalysis.totalExternalLinks} external links, ${graphAnalysis.sitemapOrphans.length} sitemap orphans (Complete: ${isGraphDiscoveryComplete})`);
 
   // 5. Evaluate All 10 Diagnostic Check Categories
   reportProgress({ status: "evaluating_rules", percent: 95 });
@@ -265,7 +290,15 @@ export async function runSiteAuditCrawl(options: CrawlOptions): Promise<CrawlAud
   // 6. Compile Crawl Inventory
   const indexablePages = crawledPages.filter((p) => p.isIndexable);
   const redirects = crawledPages.filter((p) => p.redirectHops.length > 0);
-  const brokenPages = crawledPages.filter((p) => p.statusCode >= 400);
+  const brokenPages = crawledPages.filter((p) => p.statusCode >= 400 || p.statusCode === 0);
+  const successfulPages = crawledPages.filter((p) => p.statusCode >= 200 && p.statusCode < 300);
+
+  const crawlCoverageEvaluation =
+    crawledPages.length >= sitemapResult.urls.length && isGraphDiscoveryComplete
+      ? "FULL_COVERAGE"
+      : crawledMap.size >= maxPages
+      ? "LIMITED_BY_MAX_PAGES"
+      : "PARTIAL_CRAWL";
 
   const inventory: CrawlInventory = {
     totalCrawled: crawledPages.length,
@@ -276,6 +309,21 @@ export async function runSiteAuditCrawl(options: CrawlOptions): Promise<CrawlAud
     sitemapDiscoveredCount: sitemapResult.urls.length,
     sitemapOrphanCount: graphAnalysis.sitemapOrphans.length,
     crawlIsolatedCount: graphAnalysis.crawlIsolatedPages.length,
+    sitemapUrlsDiscovered: sitemapResult.urls.length,
+    internalUrlsDiscovered: graphAnalysis.totalInternalLinks,
+    urlsQueued: queuedSet.size,
+    urlsAttempted: crawledPages.length,
+    urlsSuccessfullyFetched: successfulPages.length,
+    urlsEvaluated: crawledPages.length,
+    urlsExcludedIntentionally: 0,
+    urlsBlockedByRobots: 0,
+    urlsRedirected: redirects.length,
+    urlsFailed: brokenPages.length,
+    urlsRemainingInQueue: queue.length,
+    maxPagesConfigured: maxPages,
+    crawlTerminationReason: terminationReason,
+    isGraphDiscoveryComplete,
+    crawlCoverageEvaluation,
   };
 
   const severityCounts = {
@@ -296,7 +344,9 @@ export async function runSiteAuditCrawl(options: CrawlOptions): Promise<CrawlAud
     durationMs: completedAt.getTime() - startedAt.getTime(),
     terminationReason,
     healthScore: ruleResults.healthScore,
+    scoreModelVersion: ruleResults.scoreModelVersion || "v26-108",
     auditCoveragePercent: ruleResults.auditCoveragePercent,
+    ruleExecutionObservability: ruleResults.ruleExecutionObservability,
     scoreBreakdown: ruleResults.scoreBreakdown,
     inventory,
     severityCounts,

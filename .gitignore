@@ -36,3 +36,19 @@ parity.json
 artifacts/
 *freeze-gate*.json
 apps/backend/*freeze-gate*.json
+
+# SQLite local database storage
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+local_data/
+apps/backend/local_data/
+scratch/
+apps/backend/scratch_inspect_inventory.ts
+.cache/
+apps/backend/.cache/
+

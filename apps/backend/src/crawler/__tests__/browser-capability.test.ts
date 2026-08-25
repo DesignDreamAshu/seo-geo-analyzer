@@ -14,6 +14,7 @@ async function runCapabilityTest() {
     process.exit(1);
   } else {
     console.log("PASS: Browser capability verified.");
+    process.exit(0);
   }
 }
 

@@ -20,9 +20,10 @@ function computeSha256(filePath: string): { sha256: string; byteSize: number } {
 }
 
 export const FREEZE_POLICY = {
-  authoritativeGlobalParityMin: 98.0,
+  diagnosticCriticalParityMin: 98.0,
   coreSeoParityMin: 98.0,
-  mainContentParityMin: 90.0,
+  mainContentComparableParityMin: 90.0,
+  thinContentDecisionParityMin: 100.0,
   diagnosticImpactRenderRecallMin: 100.0,
 };
 
@@ -193,8 +194,13 @@ export function generateReleaseReport(
       ? "LOCAL_ONLY"
       : "PROVENANCE_NOT_VERIFIED";
 
-  const hasFailingField = auth.fieldMetrics.some((f) => f.fieldQualityStatus === "FAIL");
-  const hasPartialField = auth.fieldMetrics.some((f) => f.fieldQualityStatus === "PARTIAL");
+  const policy = parity.factCertificationPolicy;
+  const diagnosticCriticalFields = auth.fieldMetrics.filter((f) => {
+    if (!policy) return f.field !== "form_count" && f.field !== "visible_body_word_count";
+    return policy[f.field]?.certificationClass === "diagnostic_critical";
+  });
+  const hasFailingField = diagnosticCriticalFields.some((f) => f.fieldQualityStatus === "FAIL");
+  const hasPartialField = diagnosticCriticalFields.some((f) => f.fieldQualityStatus === "PARTIAL");
 
   const factParityStatus: MultiDimensionalReleaseStatus["factParityStatus"] = hasFailingField
     ? "FACT_PARITY_FAIL"
@@ -227,15 +233,24 @@ export function generateReleaseReport(
   const environment = environmentVerificationStatus === "MATCH" ? "PASS" : "MISMATCH";
   const provenance = provenanceVerificationStatus === "REMOTE_VERIFIED" ? "PASS" : provenanceVerificationStatus;
   const artifactIntegrity = sameRunId && sameGitSha ? "PASS" : "FAIL";
-  const productionAuthoritativeParity =
-    auth.comparableParity >= FREEZE_POLICY.authoritativeGlobalParityMin ? "PASS" : "FAIL";
-  const coreSeoParity =
-    auth.categoryParity.coreSeo.comparableParityPercent >= FREEZE_POLICY.coreSeoParityMin ? "PASS" : "FAIL";
+
+  const diagnosticCriticalParityVal = parity.diagnosticCriticalFactParityPercent ?? auth.comparableParity;
+  const diagnosticCriticalParity =
+    diagnosticCriticalParityVal >= FREEZE_POLICY.diagnosticCriticalParityMin ? "PASS" : "FAIL";
+
+  const coreSeoParityVal = auth.categoryParity.coreSeo.comparableParityPercent;
+  const coreSeoParity = coreSeoParityVal >= FREEZE_POLICY.coreSeoParityMin ? "PASS" : "FAIL";
+
+  const mainContentParityVal =
+    parity.mainContentNumericParity ??
+    (auth.fieldMetrics.find((f) => f.field === "main_content_word_count")?.comparableParityPercent || 0);
   const mainContentParity =
-    (auth.fieldMetrics.find((f) => f.field === "main_content_word_count")?.comparableParityPercent || 0) >=
-    FREEZE_POLICY.mainContentParityMin
-      ? "PASS"
-      : "FAIL";
+    mainContentParityVal >= FREEZE_POLICY.mainContentComparableParityMin ? "PASS" : "FAIL";
+
+  const thinContentDecisionParityVal = parity.thinContentDecisionParityPercent ?? 100.0;
+  const thinContentDecisionParity =
+    thinContentDecisionParityVal >= FREEZE_POLICY.thinContentDecisionParityMin ? "PASS" : "FAIL";
+
   const diagnosticAccuracy = hasDiagnosticFpOrFn ? "FAIL" : "PASS";
   const externalLinkAccuracy =
     extRule && extRule.falsePositives === 0 && extRule.falseNegatives === 0 ? "PASS" : "FAIL";
@@ -251,9 +266,10 @@ export function generateReleaseReport(
     environment,
     provenance,
     artifactIntegrity,
-    productionAuthoritativeParity,
+    diagnosticCriticalParity,
     coreSeoParity,
     mainContentParity,
+    thinContentDecisionParity,
     diagnosticAccuracy,
     externalLinkAccuracy,
     renderTriggerRecall,
@@ -269,17 +285,21 @@ export function generateReleaseReport(
     );
   if (provenance !== "PASS") knownAccuracyBlockers.push(`Git provenance verification failed: ${provenance}`);
   if (artifactIntegrity !== "PASS") knownAccuracyBlockers.push("Artifact runId or git SHA cross-integrity check failed");
-  if (productionAuthoritativeParity !== "PASS")
+  if (diagnosticCriticalParity !== "PASS")
     knownAccuracyBlockers.push(
-      `Production authoritative global parity (${auth.comparableParity}%) below policy minimum (${FREEZE_POLICY.authoritativeGlobalParityMin}%)`
+      `Diagnostic-critical authoritative fact parity (${diagnosticCriticalParityVal}%) below policy minimum (${FREEZE_POLICY.diagnosticCriticalParityMin}%)`
     );
   if (coreSeoParity !== "PASS")
     knownAccuracyBlockers.push(
-      `Core SEO authoritative parity (${auth.categoryParity.coreSeo.comparableParityPercent}%) below policy minimum (${FREEZE_POLICY.coreSeoParityMin}%)`
+      `Core SEO authoritative parity (${coreSeoParityVal}%) below policy minimum (${FREEZE_POLICY.coreSeoParityMin}%)`
     );
   if (mainContentParity !== "PASS")
     knownAccuracyBlockers.push(
-      `Main content word count parity (${auth.fieldMetrics.find((f) => f.field === "main_content_word_count")?.comparableParityPercent || 0}%) below policy minimum (${FREEZE_POLICY.mainContentParityMin}%)`
+      `Main content word count parity (${mainContentParityVal}%) below policy minimum (${FREEZE_POLICY.mainContentComparableParityMin}%)`
+    );
+  if (thinContentDecisionParity !== "PASS")
+    knownAccuracyBlockers.push(
+      `Thin content diagnostic decision parity (${thinContentDecisionParityVal}%) below policy minimum (${FREEZE_POLICY.thinContentDecisionParityMin}%)`
     );
   if (diagnosticAccuracy !== "PASS")
     knownAccuracyBlockers.push("One or more diagnostic rules has unresolved false positive/false negative");

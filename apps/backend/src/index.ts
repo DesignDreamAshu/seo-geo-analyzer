@@ -7,10 +7,42 @@ import { generatePdf } from "html-pdf-node";
 import { ReportGenerator } from "lighthouse/report/generator/report-generator.js";
 import { analyzeSite, AnalysisTimeoutError, calculateWeightedScore } from "./analysis";
 import { runSiteAuditCrawl } from "./crawler/engine";
-import { checkBrowserCapability } from "./crawler/fetcher";
+import { fetchPageHtml, checkBrowserCapability } from "./crawler/fetcher";
+import { processPageAuthoritatively } from "./crawler/page-processor";
+import { evaluateAllDiagnosticRules } from "./crawler/rules";
+import { normalizeUrl } from "./crawler/normalizer";
 import { getGitProvenance } from "./crawler/verification/git-info";
 import { normalizeAuditUrl } from "./storage/lighthouse-store";
 import { saveShareRecord, getShareRecord } from "./storage/share-store";
+import {
+  createPersistenceLayer,
+  normalizeDomain,
+  executeAndPersistAudit,
+  computeAuditComparison,
+  reconstructHistoricalReportMarkdown,
+} from "./crawler/persistence";
+import {
+  RULE_VERIFICATION_CAPABILITY_REGISTRY,
+  getRuleVerificationCapability,
+} from "./crawler/verification/rule-verification-registry";
+import {
+  verifySingleResource,
+  verifyBatchAffected,
+} from "./crawler/verification/issue-verifier";
+import {
+  evaluateOnSiteAISearchReadiness,
+  generateProjectKnowledgeAndPromptUniverse,
+  globalKnowledgeGovernance,
+  globalAIObservationEngine,
+  globalAIVisibilityAnalyticsEngine,
+  globalAIVisibilityTrendEngine,
+  globalAISourceIntelligenceEngine,
+  globalAIOptimizationEngine,
+  AIOptimizationVerifier,
+} from "./ai-search/engine";
+import { SqliteAnalyticsRepository } from "./ai-search/analytics/persistence/sqlite-analytics-repo";
+import { SqliteCitationRepository } from "./ai-search/citations/persistence/sqlite-citation-repo";
+import { SqliteOptimizationRepository } from "./ai-search/optimization/persistence/sqlite-optimization-repo";
 import type { ExportPayload, ModuleSnapshot } from "./types";
 
 const PSI_URL = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
@@ -335,6 +367,33 @@ app.get("/api/events", (req, res) => {
   });
 });
 
+const persistence = createPersistenceLayer();
+
+async function ensureProjectForUrl(url: string, country?: string, device?: string) {
+  const normDomain = normalizeDomain(url);
+  let project = await persistence.projects.getProjectByDomain(normDomain);
+  if (!project) {
+    const projectId = `proj_${nanoid(8)}`;
+    let hostname = "site";
+    try {
+      const parsedUrl = new URL(url.startsWith("http") ? url : `https://${url}`);
+      hostname = parsedUrl.hostname.replace(/^www\./, "");
+    } catch {
+      hostname = normDomain;
+    }
+    project = await persistence.projects.createProject({
+      projectId,
+      name: hostname,
+      primaryDomain: url.startsWith("http") ? url : `https://${url}`,
+      normalizedDomain: normDomain,
+      status: "ACTIVE",
+      defaultCountry: country || "US",
+      defaultDevice: (device as any) || "MOBILE",
+    });
+  }
+  return project;
+}
+
 const handleCrawlerAuditRequest = async (req: express.Request, res: express.Response) => {
   const { url, maxPages, maxDepth, concurrency, allowSubdomains, respectRobotsTxt } = req.body ?? {};
   if (!url || typeof url !== "string") {
@@ -344,23 +403,99 @@ const handleCrawlerAuditRequest = async (req: express.Request, res: express.Resp
   try {
     sendEvent("crawler:start", { url });
 
-    const auditResult = await runSiteAuditCrawl({
-      seedUrl: url,
-      maxPages: Number(maxPages) || 50,
-      maxDepth: Number(maxDepth) || 5,
-      concurrency: Number(concurrency) || 5,
-      allowSubdomains: Boolean(allowSubdomains),
-      respectRobotsTxt: respectRobotsTxt !== false,
-      onProgress: (progress) => {
-        sendEvent("crawler:progress", progress);
+    const project = await ensureProjectForUrl(url);
+
+    const persistedOutput = await executeAndPersistAudit({
+      project,
+      persistenceLayer: persistence,
+      crawlOptions: {
+        seedUrl: url,
+        maxPages: Number(maxPages) || 50,
+        maxDepth: Number(maxDepth) || 5,
+        concurrency: Number(concurrency) || 5,
+        allowSubdomains: Boolean(allowSubdomains),
+        respectRobotsTxt: respectRobotsTxt !== false,
+        onProgress: (progress) => {
+          sendEvent("crawler:progress", progress);
+        },
       },
+      trigger: "MANUAL",
     });
 
-    console.log(`[API /api/crawler/audit FINAL CRAWL RESULT]`, {
+    const auditResult = persistedOutput.crawlResult
+      ? {
+          ...persistedOutput.crawlResult,
+          auditId: persistedOutput.auditRun.auditRunId,
+          persistedAuditRun: persistedOutput.auditRun,
+          comparison: persistedOutput.comparison,
+        }
+      : {
+          auditId: persistedOutput.auditRun.auditRunId,
+          seedUrl: url,
+          normalizedSeedUrl: project.normalizedDomain,
+          startedAt: persistedOutput.auditRun.startedAt,
+          completedAt: persistedOutput.auditRun.completedAt || new Date().toISOString(),
+          durationMs: 0,
+          healthScore: persistedOutput.metrics.seoScore || 80,
+          inventory: {
+            totalCrawled: persistedOutput.pages.length,
+            totalIndexable: persistedOutput.pages.filter((p) => p.indexability === "INDEXABLE").length,
+            totalNonIndexable: persistedOutput.pages.filter((p) => p.indexability === "NON_INDEXABLE").length,
+            totalRedirects: persistedOutput.pages.filter((p) => p.redirectChain && p.redirectChain.length > 0).length,
+            totalBrokenPages: persistedOutput.pages.filter((p) => p.statusCode >= 400).length,
+            sitemapDiscoveredCount: 0,
+            sitemapOrphanCount: 0,
+            crawlIsolatedCount: 0,
+          },
+          severityCounts: {
+            critical: persistedOutput.metrics.criticalCount,
+            warnings: persistedOutput.metrics.highCount,
+            opportunities: persistedOutput.metrics.mediumCount,
+            notices: persistedOutput.metrics.lowCount,
+          },
+          categories: [],
+          issues: persistedOutput.findings.map((f) => ({
+            id: f.auditFindingId,
+            code: f.ruleId,
+            category: "general",
+            title: f.message,
+            description: f.message,
+            recommendation: "Review and remediate issue.",
+            confidence: "confirmed",
+            confidenceScore: 1.0,
+            impactScore: 10,
+            affectedCount: 1,
+            severity: f.severity.toLowerCase(),
+            affectedPages: [{ url: f.normalizedUrl, evidence: f.evidence }],
+          })),
+          crawledPages: persistedOutput.pages.map((p) => ({
+            url: p.normalizedUrl,
+            normalizedUrl: p.normalizedUrl,
+            statusCode: p.statusCode,
+            isIndexable: p.indexability === "INDEXABLE",
+            indexabilityStatus: p.indexability === "INDEXABLE" ? "Indexable" : "Non-Indexable",
+            canonicalUrl: p.canonicalUrl,
+            title: p.title,
+            metaDescription: p.metaDescription,
+            h1s: p.h1Summary ? [p.h1Summary] : [],
+            crawlDepth: p.crawlDepth,
+            responseTimeMs: p.responseMetadata?.responseTimeMs || 0,
+            wordCount: p.responseMetadata?.wordCount || 0,
+            classification: { primaryClass: "page", confidence: 1.0 },
+            outlinks: [],
+          })),
+          sitemapOrphans: [],
+          linkGraphSummary: {},
+          persistedAuditRun: persistedOutput.auditRun,
+          comparison: persistedOutput.comparison,
+        };
+
+    console.log(`[API /api/crawler/audit FINAL PERSISTED RESULT]`, {
       auditId: auditResult.auditId,
       pagesCount: auditResult.crawledPages.length,
       issuesCount: auditResult.issues.length,
       healthScore: auditResult.healthScore,
+      comparison: persistedOutput.comparison ? `Baseline #${persistedOutput.comparison.baselineSequenceNumber}` : "Baseline",
     });
 
     sendEvent("crawler:complete", auditResult);
@@ -383,42 +518,808 @@ const handleCrawlerAuditRequest = async (req: express.Request, res: express.Resp
 app.post("/api/crawler/audit", handleCrawlerAuditRequest);
 app.post("/api/audit/crawl", handleCrawlerAuditRequest);
 
+// --- Phase 24 Project Persistence & Audit History REST API ---
+
+// 1. List Projects with latest audit run and comparison summary
+app.get("/api/projects", async (_req, res) => {
+  try {
+    const projects = await persistence.projects.listProjects("ACTIVE");
+    const enriched = await Promise.all(
+      projects.map(async (p) => {
+        const auditCount = await persistence.auditRuns.countAuditRunsForProject(p.projectId);
+        const latestAudit = await persistence.auditRuns.getLatestCompletedAuditRun(p.projectId);
+        let latestMetrics = null;
+        let latestComparison = null;
+        if (latestAudit) {
+          latestMetrics = await persistence.auditMetrics.getMetricsForAuditRun(latestAudit.auditRunId);
+          const comparisons = await persistence.auditComparisons.listComparisonsForProject(p.projectId, 1);
+          latestComparison = comparisons[0] || null;
+        }
+        return {
+          ...p,
+          auditCount,
+          latestAudit,
+          latestMetrics,
+          latestComparison,
+        };
+      })
+    );
+    return res.json({ ok: true, projects: enriched });
+  } catch (err) {
+    console.error("Failed to list projects", err);
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 2. Create or find Project
+app.post("/api/projects", async (req, res) => {
+  try {
+    const { domain, name, defaultCountry, defaultDevice } = req.body || {};
+    if (!domain) return res.status(400).json({ error: "domain is required" });
+    const project = await ensureProjectForUrl(domain, defaultCountry, defaultDevice);
+    if (name && name !== project.name) {
+      await persistence.projects.updateProject(project.projectId, { name });
+    }
+    return res.json({ ok: true, project });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 3. Get Project by ID
+app.get("/api/projects/:projectId", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const auditCount = await persistence.auditRuns.countAuditRunsForProject(project.projectId);
+    return res.json({ ok: true, project: { ...project, auditCount } });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 4. List Audit Runs for a Project (with sequence, date, metrics, and comparison)
+app.get("/api/projects/:projectId/audits", async (req, res) => {
+  try {
+    const { limit = 50, offset = 0 } = req.query;
+    const audits = await persistence.auditRuns.listAuditRunsForProject(
+      req.params.projectId,
+      Number(limit),
+      Number(offset)
+    );
+    const comparisons = await persistence.auditComparisons.listComparisonsForProject(req.params.projectId, 100);
+    const enrichedAudits = await Promise.all(
+      audits.map(async (audit) => {
+        const metrics = await persistence.auditMetrics.getMetricsForAuditRun(audit.auditRunId);
+        const comp = comparisons.find((c) => c.currentAuditRunId === audit.auditRunId) || null;
+        return {
+          ...audit,
+          metrics,
+          comparisonWithPrevious: comp,
+        };
+      })
+    );
+    return res.json({ ok: true, audits: enrichedAudits });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 5. Get Single Historical Audit Run Details
+app.get("/api/audits/:auditRunId", async (req, res) => {
+  try {
+    const auditRun = await persistence.auditRuns.getAuditRunById(req.params.auditRunId);
+    if (!auditRun) return res.status(404).json({ error: "Audit run not found" });
+    const project = await persistence.projects.getProjectById(auditRun.projectId);
+    const pages = await persistence.auditPages.getPagesForAuditRun(auditRun.auditRunId, 1000);
+    const findings = await persistence.auditFindings.getFindingsForAuditRun(auditRun.auditRunId, 5000);
+    const metrics = await persistence.auditMetrics.getMetricsForAuditRun(auditRun.auditRunId);
+    const comparisons = await persistence.auditComparisons.listComparisonsForProject(auditRun.projectId, 50);
+    const comparisonWithPrevious = comparisons.find((c) => c.currentAuditRunId === auditRun.auditRunId) || null;
+    const historicalReportMarkdown = reconstructHistoricalReportMarkdown({
+      projectName: project?.name || "Website",
+      auditRun,
+      pages,
+      findings,
+      metrics,
+      comparisonWithPrevious,
+    });
+
+    // Check if full snapshot exists
+    const snapshot = await persistence.auditSnapshots.getSnapshot(auditRun.auditRunId);
+    let siteAudit: any = null;
+    if (snapshot && snapshot.payloadJson) {
+      try {
+        const parsed = JSON.parse(snapshot.payloadJson);
+        if (parsed.crawlResult) {
+          siteAudit = parsed.crawlResult;
+        }
+      } catch {}
+    }
+
+    if (!siteAudit) {
+      // Reconstruct siteAudit structure cleanly from persisted entities
+      siteAudit = {
+        auditId: auditRun.auditRunId,
+        seedUrl: project?.primaryDomain || "",
+        normalizedSeedUrl: project?.normalizedDomain || "",
+        startedAt: auditRun.startedAt,
+        completedAt: auditRun.completedAt || auditRun.startedAt,
+        durationMs: 0,
+        healthScore: metrics?.seoScore ?? 80,
+        inventory: {
+          totalCrawled: pages.length,
+          totalIndexable: pages.filter((p) => p.indexability === "INDEXABLE").length,
+          totalNonIndexable: pages.filter((p) => p.indexability !== "INDEXABLE").length,
+          totalRedirects: pages.filter((p) => p.redirectChain && p.redirectChain.length > 0).length,
+          totalBrokenPages: pages.filter((p) => p.statusCode >= 400).length,
+          sitemapDiscoveredCount: 0,
+          sitemapOrphanCount: 0,
+          crawlIsolatedCount: 0,
+        },
+        severityCounts: {
+          critical: metrics?.criticalCount ?? 0,
+          warnings: metrics?.highCount ?? 0,
+          opportunities: metrics?.mediumCount ?? 0,
+          notices: metrics?.lowCount ?? 0,
+        },
+        categories: [],
+        issues: findings.map((f) => ({
+          id: f.auditFindingId,
+          code: f.ruleId,
+          category: f.evidence?.category || "general",
+          title: f.message,
+          description: f.evidence?.description || f.message,
+          severity: (f.severity?.toLowerCase() || "opportunity") as any,
+          confidence: "confirmed" as any,
+          confidenceScore: 1.0,
+          impactScore: f.severity === "CRITICAL" ? 4 : f.severity === "HIGH" ? 3 : 2,
+          scorePenalty: f.evidence?.scorePenalty || 0,
+          affectedPages: f.evidence?.affectedPages || [{ url: f.normalizedUrl, evidence: f.evidence }],
+          affectedCount: f.evidence?.affectedCount || 1,
+          affectedOccurrences: 1,
+          affectedUniquePages: 1,
+          eligiblePageCount: pages.length || 1,
+          affectedRatio: 1 / Math.max(1, pages.length),
+        })),
+        crawledPages: pages.map((p) => ({
+          url: p.originalUrl || p.normalizedUrl,
+          requestedUrl: p.originalUrl || p.normalizedUrl,
+          normalizedUrl: p.normalizedUrl,
+          finalUrl: p.finalUrl || p.originalUrl || p.normalizedUrl,
+          statusCode: p.statusCode,
+          redirectHops: [],
+          contentType: "text/html",
+          resourceType: "html_page" as any,
+          responseTimeMs: p.responseMetadata?.responseTimeMs || 0,
+          depth: p.crawlDepth || 0,
+          html: "",
+          headers: {},
+          crawledAt: p.createdAt,
+          sourceMode: "raw_http" as any,
+          renderMode: "raw" as any,
+          renderReason: "persisted_snapshot",
+          renderConfidence: "high" as any,
+          rawWordCount: p.responseMetadata?.wordCount || 0,
+          rawDocumentWordCount: p.responseMetadata?.wordCount || 0,
+          visibleBodyWordCount: p.responseMetadata?.wordCount || 0,
+          mainContentWordCount: p.responseMetadata?.wordCount || 0,
+          renderedWordCount: p.responseMetadata?.wordCount || 0,
+          rawH1Count: 1,
+          renderedH1Count: 1,
+          rawTitle: p.title || null,
+          renderedTitle: p.title || null,
+          soft404Status: "valid_page" as any,
+          title: p.title || null,
+          titleLength: p.title?.length || 0,
+          metaDescription: p.metaDescription || null,
+          metaDescriptionLength: p.metaDescription?.length || 0,
+          canonicalUrl: p.canonicalUrl || null,
+          isCanonicalSelfReferencing: true,
+          isCanonicalTargetReachable: true,
+          metaRobots: null,
+          xRobotsTag: null,
+          isIndexable: p.indexability === "INDEXABLE",
+          indexabilityStatus: (p.indexability?.toLowerCase() || "indexable") as any,
+          h1s: p.h1Summary ? [p.h1Summary] : [],
+          h1Count: 1,
+          h1Tags: [],
+          h2Tags: [],
+          h3Tags: [],
+          headingsOutline: [],
+          headingsHierarchyValid: true,
+          headingsHierarchyIssues: [],
+          wordCount: p.responseMetadata?.wordCount || 0,
+          textToHtmlRatio: 0,
+          landmarks: { hasMain: true, mainCount: 1, navCount: 1, footerCount: 1, headerCount: 1, asideCount: 0 },
+          forms: [],
+          images: [],
+          resources: [],
+          outlinks: [],
+          openGraph: { rawTags: [], missingRequiredTags: [], duplicateTags: [], emptyTags: [], imageFetchState: "FETCH_NOT_EVALUATED", canonicalConsistent: true, validationStatus: "NOT_EVALUATED" },
+          twitterCard: { rawTags: [], missingTags: [], hasExplicitCard: false, hasOgFallback: false, validationStatus: "NOT_EVALUATED" },
+          schemaJsonLd: [],
+          classification: { primaryClass: "marketing_landing", confidence: 1.0, signals: [] },
+        })),
+        scoreBreakdown: {
+          startingScore: 100,
+          finalScore: metrics?.seoScore ?? 80,
+          totalDeductions: Math.max(0, 100 - (metrics?.seoScore ?? 80)),
+          deductions: [],
+        },
+      };
+    }
+
+    return res.json({
+      ok: true,
+      project,
+      auditRun,
+      pages,
+      findings,
+      metrics,
+      comparisonWithPrevious,
+      historicalReportMarkdown,
+      siteAudit,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 5b. Get Latest Completed Audit Run for Project
+app.get("/api/projects/:projectId/latest-audit", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const latestAudit = await persistence.auditRuns.getLatestCompletedAuditRun(project.projectId);
+    if (!latestAudit) return res.status(404).json({ error: "No completed audits found for project" });
+
+    const pages = await persistence.auditPages.getPagesForAuditRun(latestAudit.auditRunId, 1000);
+    const findings = await persistence.auditFindings.getFindingsForAuditRun(latestAudit.auditRunId, 5000);
+    const metrics = await persistence.auditMetrics.getMetricsForAuditRun(latestAudit.auditRunId);
+    const comparisons = await persistence.auditComparisons.listComparisonsForProject(project.projectId, 50);
+    const comparisonWithPrevious = comparisons.find((c) => c.currentAuditRunId === latestAudit.auditRunId) || null;
+
+    const snapshot = await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId);
+    let siteAudit: any = null;
+    if (snapshot && snapshot.payloadJson) {
+      try {
+        const parsed = JSON.parse(snapshot.payloadJson);
+        if (parsed.crawlResult) {
+          siteAudit = parsed.crawlResult;
+        }
+      } catch {}
+    }
+
+    return res.json({
+      ok: true,
+      project,
+      auditRun: latestAudit,
+      pages,
+      findings,
+      metrics,
+      comparisonWithPrevious,
+      siteAudit,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 6. Get Historical Report Markdown
+app.get("/api/audits/:auditRunId/report", async (req, res) => {
+  try {
+    const auditRun = await persistence.auditRuns.getAuditRunById(req.params.auditRunId);
+    if (!auditRun) return res.status(404).send("Audit run not found");
+    const project = await persistence.projects.getProjectById(auditRun.projectId);
+    const pages = await persistence.auditPages.getPagesForAuditRun(auditRun.auditRunId, 1000);
+    const findings = await persistence.auditFindings.getFindingsForAuditRun(auditRun.auditRunId, 5000);
+    const metrics = await persistence.auditMetrics.getMetricsForAuditRun(auditRun.auditRunId);
+    const comparisons = await persistence.auditComparisons.listComparisonsForProject(auditRun.projectId, 50);
+    const comparisonWithPrevious = comparisons.find((c) => c.currentAuditRunId === auditRun.auditRunId) || null;
+    const markdown = reconstructHistoricalReportMarkdown({
+      projectName: project?.name || "Website",
+      auditRun,
+      pages,
+      findings,
+      metrics,
+      comparisonWithPrevious,
+    });
+    res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+    return res.send(markdown);
+  } catch (err) {
+    return res.status(500).send((err as Error).message);
+  }
+});
+
+// 7. Compare Two Audit Runs (Baseline vs Current)
+app.get("/api/projects/:projectId/compare", async (req, res) => {
+  try {
+    const { baselineAuditRunId, currentAuditRunId } = req.query as { baselineAuditRunId: string; currentAuditRunId: string };
+    if (!baselineAuditRunId || !currentAuditRunId) {
+      return res.status(400).json({ error: "baselineAuditRunId and currentAuditRunId are required" });
+    }
+    let comparison = await persistence.auditComparisons.getComparison(baselineAuditRunId, currentAuditRunId);
+    if (!comparison) {
+      const baselineAudit = await persistence.auditRuns.getAuditRunById(baselineAuditRunId);
+      const currentAudit = await persistence.auditRuns.getAuditRunById(currentAuditRunId);
+      if (!baselineAudit || !currentAudit) {
+        return res.status(404).json({ error: "One or both audit runs not found" });
+      }
+      const baselinePages = await persistence.auditPages.getPagesForAuditRun(baselineAuditRunId, 5000);
+      const currentPages = await persistence.auditPages.getPagesForAuditRun(currentAuditRunId, 5000);
+      const baselineFindings = await persistence.auditFindings.getFindingsForAuditRun(baselineAuditRunId, 5000);
+      const currentFindings = await persistence.auditFindings.getFindingsForAuditRun(currentAuditRunId, 5000);
+      const historicalFindings = await persistence.auditFindings.listHistoricalFindingsForFingerprints(
+        req.params.projectId,
+        currentFindings.map((f) => f.findingFingerprint)
+      );
+      comparison = computeAuditComparison({
+        projectId: req.params.projectId,
+        baselineAudit,
+        currentAudit,
+        baselinePages,
+        currentPages,
+        baselineFindings,
+        currentFindings,
+        historicalFindingsForProject: historicalFindings,
+      });
+      await persistence.auditComparisons.saveComparison(comparison);
+    }
+    return res.json({ ok: true, comparison });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 8. Finding History (Lifecycle across audits)
+app.get("/api/projects/:projectId/findings/history", async (req, res) => {
+  try {
+    const { fingerprint } = req.query as { fingerprint: string };
+    if (!fingerprint) {
+      return res.status(400).json({ error: "fingerprint query param is required" });
+    }
+    const history = await persistence.auditFindings.getFindingHistory(req.params.projectId, fingerprint);
+    return res.json({ ok: true, history });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 9. URL History (Page snapshots across audits)
+app.get("/api/projects/:projectId/urls/history", async (req, res) => {
+  try {
+    const { url } = req.query as { url: string };
+    if (!url) {
+      return res.status(400).json({ error: "url query param is required" });
+    }
+    const history = await persistence.auditPages.getPageHistory(req.params.projectId, url);
+    return res.json({ ok: true, history });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 10. Trigger Full Re-Crawl Audit for Project (Strictly inheriting source audit configuration)
+app.post("/api/projects/:projectId/recrawl", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const { maxPages, maxDepth, sourceAuditRunId } = req.body || {};
+
+    // Source audit configuration is authoritative
+    const sourceAudit = sourceAuditRunId
+      ? await persistence.auditRuns.getAuditRunById(sourceAuditRunId)
+      : await persistence.auditRuns.getLatestAuditRunForProject(req.params.projectId);
+
+    const prevConfig = sourceAudit?.configurationSnapshot?.crawlSettings;
+    const prevMaxPages = prevConfig?.maxPages;
+    const prevMaxDepth = prevConfig?.maxDepth;
+
+    let isConfigFallback = false;
+    let effectiveMaxPages: number;
+    if (typeof maxPages === "number" && maxPages > 0) {
+      effectiveMaxPages = maxPages;
+    } else if (typeof prevMaxPages === "number" && prevMaxPages > 0) {
+      effectiveMaxPages = prevMaxPages;
+    } else {
+      effectiveMaxPages = 150;
+      isConfigFallback = true;
+    }
+
+    const effectiveMaxDepth = (typeof maxDepth === "number" && maxDepth > 0) ? maxDepth : (prevMaxDepth && prevMaxDepth > 0 ? prevMaxDepth : 5);
+
+    console.log(`[API /api/projects/:projectId/recrawl] Re-crawling ${project.primaryDomain} | Source audit: ${sourceAudit?.auditRunId || "latest"} | Inherited maxPages: ${effectiveMaxPages} (fallback: ${isConfigFallback}) | maxDepth: ${effectiveMaxDepth}`);
+
+    sendEvent("crawler:start", { url: project.primaryDomain });
+    const output = await executeAndPersistAudit({
+      project,
+      persistenceLayer: persistence,
+      crawlOptions: {
+        seedUrl: project.primaryDomain,
+        maxPages: effectiveMaxPages,
+        maxDepth: effectiveMaxDepth,
+        onProgress: (p) => sendEvent("crawler:progress", p),
+      },
+      trigger: "MANUAL",
+    });
+    sendEvent("crawler:complete", {
+      auditId: output.auditRun.auditRunId,
+      pagesCount: output.pages.length,
+      healthScore: output.metrics.seoScore,
+      siteAudit: output.crawlResult,
+    });
+    return res.json({ ok: true, isConfigFallback, effectiveMaxPages, ...output });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 11. Verification Capabilities Registry
+app.get("/api/rules/verification-capabilities", (_req, res) => {
+  return res.json({
+    ok: true,
+    capabilities: RULE_VERIFICATION_CAPABILITY_REGISTRY,
+    totalRules: 95,
+  });
+});
+
+// 12. Targeted Issue Verification (Verify Issue / Verify All Affected)
+app.post("/api/projects/:projectId/verify-issue", async (req, res) => {
+  try {
+    const { ruleId, findingFingerprint, affectedResources = [], sourceAuditRunId } = req.body || {};
+    if (!ruleId) {
+      return res.status(400).json({ error: "ruleId is required." });
+    }
+
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    // Execute live issue verification across all specified affected resources
+    const batchSummary = await verifyBatchAffected(
+      ruleId,
+      affectedResources,
+      project.normalizedDomain,
+      3, // Concurrency limit
+      12000 // Timeout
+    );
+
+    // Record verification event in finding lifecycle history if sourceAuditRunId is present
+    if (sourceAuditRunId) {
+      const recordsToInsert = batchSummary.results.map((r) => ({
+        auditFindingId: `vf_${nanoid(10)}`,
+        auditRunId: sourceAuditRunId,
+        projectId: project.projectId,
+        ruleId,
+        severity: (r.status === "VERIFIED_FIXED" ? "LOW" : "HIGH") as any,
+        findingState: (r.isFixed ? "FIXED" : "OPEN") as any,
+        message: r.message,
+        evidence: {
+          verificationType: "ISSUE_LIVE_VERIFICATION",
+          observedUrl: r.url,
+          targetUrl: r.targetUrl,
+          verificationResult: r.status,
+          liveEvidence: r.liveEvidence,
+          verifiedAt: r.verifiedAt,
+        },
+        normalizedUrl: normalizeUrl(r.url),
+        findingFingerprint: findingFingerprint || `fp_${ruleId}_${normalizeUrl(r.url)}`,
+        createdAt: r.verifiedAt,
+      }));
+
+      if (recordsToInsert.length > 0) {
+        await persistence.auditFindings.batchInsertFindings(recordsToInsert);
+      }
+    }
+
+    return res.json({
+      ok: true,
+      ruleId,
+      findingFingerprint,
+      ...batchSummary,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 13. Targeted Finding Verification (Single Resource Verify Fix)
+app.post("/api/projects/:projectId/verify-finding", async (req, res) => {
+  try {
+    const { findingFingerprint, ruleId, url, targetUrl, rawHref, domSelector, codeSnippet, occurrences, sourceAuditRunId } = req.body || {};
+    if (!url || !ruleId) {
+      return res.status(400).json({ error: "url and ruleId are required." });
+    }
+
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    // Execute rule-specific verification for single resource
+    const verificationResult = await verifySingleResource(
+      ruleId,
+      { url, targetUrl, rawHref, domSelector, codeSnippet, occurrences },
+      project.normalizedDomain,
+      12000
+    );
+
+    // Record verification event in finding lifecycle history if source audit run exists
+    if (sourceAuditRunId) {
+      await persistence.auditFindings.batchInsertFindings([
+        {
+          auditFindingId: `vf_${nanoid(10)}`,
+          auditRunId: sourceAuditRunId,
+          projectId: project.projectId,
+          ruleId,
+          severity: (verificationResult.isFixed ? "LOW" : "HIGH") as any,
+          findingState: (verificationResult.isFixed ? "FIXED" : "OPEN") as any,
+          message: verificationResult.message,
+          evidence: {
+            verificationType: "FINDING_VERIFICATION",
+            observedUrl: url,
+            targetUrl: verificationResult.targetUrl,
+            verificationResult: verificationResult.status,
+            occurrenceDiff: verificationResult.occurrenceDiff,
+            liveEvidence: verificationResult.liveEvidence,
+            verifiedAt: verificationResult.verifiedAt,
+          },
+          normalizedUrl: normalizeUrl(url),
+          findingFingerprint: findingFingerprint || `fp_${ruleId}_${normalizeUrl(url)}`,
+          createdAt: verificationResult.verifiedAt,
+        },
+      ]);
+    }
+
+    return res.json({
+      ok: true,
+      verificationResult: verificationResult.status,
+      ruleId,
+      url,
+      isFixed: verificationResult.isFixed,
+      findingFingerprint,
+      message: verificationResult.message,
+      occurrenceDiff: verificationResult.occurrenceDiff,
+      liveEvidence: verificationResult.liveEvidence,
+      verifiedAt: verificationResult.verifiedAt,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 12. Targeted Page Recheck (Recheck This Page)
+app.post("/api/projects/:projectId/recheck-page", async (req, res) => {
+  try {
+    const { url, sourceAuditRunId } = req.body || {};
+    if (!url) return res.status(400).json({ error: "url is required" });
+
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const fetchRes = await fetchPageHtml(url);
+    if (!fetchRes.ok && fetchRes.statusCode === 0) {
+      return res.json({
+        ok: true,
+        url,
+        statusCode: 0,
+        status: "FETCH_FAILED",
+        issues: [],
+        message: "Failed to connect to target URL.",
+      });
+    }
+
+    const pageData = await processPageAuthoritatively(
+      url,
+      normalizeUrl(url),
+      fetchRes.finalUrl,
+      fetchRes.statusCode,
+      fetchRes.redirectHops,
+      fetchRes.html,
+      fetchRes.headers,
+      fetchRes.responseTimeMs,
+      0,
+      { seedNormalized: project.normalizedDomain }
+    );
+
+    const evalResults = evaluateAllDiagnosticRules([pageData]);
+
+    // Retrieve previous findings for this URL if sourceAuditRunId provided
+    let previousFindings: any[] = [];
+    if (sourceAuditRunId) {
+      const allAuditFindings = await persistence.auditFindings.getFindingsForAuditRun(sourceAuditRunId, 2000);
+      previousFindings = allAuditFindings.filter((f) => f.normalizedUrl === normalizeUrl(url));
+    }
+
+    const currentRuleCodes = new Set(evalResults.issues.map((i) => i.code));
+    const previousRuleCodes = new Set(previousFindings.map((f) => f.ruleId));
+
+    const fixedIssues = previousFindings.filter((f) => !currentRuleCodes.has(f.ruleId));
+    const stillPresentIssues = evalResults.issues.filter((i) => previousRuleCodes.has(i.code));
+    const newIssuesOnPage = evalResults.issues.filter((i) => !previousRuleCodes.has(i.code));
+
+    // Save page snapshot to URL history
+    await persistence.auditPages.batchInsertPages([
+      {
+        auditPageId: `pr_${nanoid(10)}`,
+        auditRunId: sourceAuditRunId || `recheck_${Date.now()}`,
+        projectId: project.projectId,
+        originalUrl: url,
+        finalUrl: pageData.finalUrl,
+        normalizedUrl: normalizeUrl(url),
+        crawlDepth: 0,
+        statusCode: pageData.statusCode,
+        indexability: pageData.isIndexable ? "INDEXABLE" : "NON_INDEXABLE",
+        title: pageData.title || undefined,
+        responseMetadata: {
+          responseTimeMs: pageData.responseTimeMs,
+          wordCount: pageData.wordCount,
+          verificationType: "PAGE_RECHECK",
+          issuesCount: evalResults.issues.length,
+        },
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+
+    return res.json({
+      ok: true,
+      url,
+      statusCode: pageData.statusCode,
+      title: pageData.title,
+      wordCount: pageData.wordCount,
+      indexability: pageData.isIndexable ? "INDEXABLE" : "NON_INDEXABLE",
+      fixedCount: fixedIssues.length,
+      stillPresentCount: stillPresentIssues.length,
+      newCount: newIssuesOnPage.length,
+      fixedIssues: fixedIssues.map((f) => ({ ruleId: f.ruleId, message: f.message })),
+      currentIssues: evalResults.issues,
+      recheckedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 13. Trigger Crawl Audit for Project
+app.post("/api/projects/:projectId/crawl", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const { maxPages, maxDepth } = req.body || {};
+    sendEvent("crawler:start", { url: project.primaryDomain });
+    const output = await executeAndPersistAudit({
+      project,
+      persistenceLayer: persistence,
+      crawlOptions: {
+        seedUrl: project.primaryDomain,
+        maxPages: Number(maxPages) || 50,
+        maxDepth: Number(maxDepth) || 5,
+        onProgress: (p) => sendEvent("crawler:progress", p),
+      },
+      trigger: "MANUAL",
+    });
+    sendEvent("crawler:complete", {
+      auditId: output.auditRun.auditRunId,
+      pagesCount: output.pages.length,
+      healthScore: output.metrics.seoScore,
+      siteAudit: output.crawlResult,
+    });
+    return res.json({ ok: true, ...output });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 app.post("/api/analyze", async (req, res) => {
   const { url, strategy, locale, skipCache, maxPages } = req.body ?? {};
   if (!url || typeof url !== "string") {
     return res.status(400).json({ error: "url is required" });
   }
 
-  const requestedMaxPages = Number(maxPages) > 0 ? Number(maxPages) : 50;
+  const requestedMaxPages = Number(maxPages) > 0 ? Number(maxPages) : 150;
   console.log(`[API /api/analyze] Starting analysis for ${url} | Requested maxPages: ${requestedMaxPages}`);
 
   try {
     sendEvent("crawler:start", { url });
 
-    // Run both single-page module audit and multi-page crawler concurrently
-    const [analysis, siteAudit] = await Promise.all([
+    const project = await ensureProjectForUrl(url);
+
+    // Run both single-page module audit and multi-page crawler with persistence concurrently
+    const [analysis, persistedOutput] = await Promise.all([
       analyzeSite({
         url,
         strategy,
         locale,
         skipCache: Boolean(skipCache),
       }),
-      runSiteAuditCrawl({
-        seedUrl: url,
-        maxPages: requestedMaxPages,
-        maxDepth: 5,
-        concurrency: 5,
-        onProgress: (progress) => {
-          sendEvent("crawler:progress", progress);
+      executeAndPersistAudit({
+        project,
+        persistenceLayer: persistence,
+        crawlOptions: {
+          seedUrl: url,
+          maxPages: requestedMaxPages,
+          maxDepth: 5,
+          concurrency: 5,
+          onProgress: (progress) => {
+            sendEvent("crawler:progress", progress);
+          },
         },
+        trigger: "MANUAL",
       }).catch((err) => {
-        console.error("Crawler error in /api/analyze:", err);
+        console.error("Crawler persistence error in /api/analyze:", err);
         return null;
       }),
     ]);
 
-    if (siteAudit) {
-      console.log(`[API /api/analyze FINAL CRAWL RESULT]`, {
+    let siteAudit = null;
+    if (persistedOutput) {
+      siteAudit = persistedOutput.crawlResult
+        ? {
+            ...persistedOutput.crawlResult,
+            auditId: persistedOutput.auditRun.auditRunId,
+            persistedAuditRun: persistedOutput.auditRun,
+            comparison: persistedOutput.comparison,
+          }
+        : {
+            auditId: persistedOutput.auditRun.auditRunId,
+            seedUrl: url,
+            normalizedSeedUrl: project.normalizedDomain,
+            startedAt: persistedOutput.auditRun.startedAt,
+            completedAt: persistedOutput.auditRun.completedAt || new Date().toISOString(),
+            durationMs: 0,
+            healthScore: persistedOutput.metrics.seoScore || 80,
+            inventory: {
+              totalCrawled: persistedOutput.pages.length,
+              totalIndexable: persistedOutput.pages.filter((p) => p.indexability === "INDEXABLE").length,
+              totalNonIndexable: persistedOutput.pages.filter((p) => p.indexability === "NON_INDEXABLE").length,
+              totalRedirects: persistedOutput.pages.filter((p) => p.redirectChain && p.redirectChain.length > 0).length,
+              totalBrokenPages: persistedOutput.pages.filter((p) => p.statusCode >= 400).length,
+              sitemapDiscoveredCount: 0,
+              sitemapOrphanCount: 0,
+              crawlIsolatedCount: 0,
+            },
+            severityCounts: {
+              critical: persistedOutput.metrics.criticalCount,
+              warnings: persistedOutput.metrics.highCount,
+              opportunities: persistedOutput.metrics.mediumCount,
+              notices: persistedOutput.metrics.lowCount,
+            },
+            categories: [],
+            issues: persistedOutput.findings.map((f) => ({
+              id: f.auditFindingId,
+              code: f.ruleId,
+              category: "general",
+              title: f.message,
+              description: f.message,
+              recommendation: "Review and remediate issue.",
+              confidence: "confirmed",
+              confidenceScore: 1.0,
+              impactScore: 10,
+              affectedCount: 1,
+              severity: f.severity.toLowerCase(),
+              affectedPages: [{ url: f.normalizedUrl, evidence: f.evidence }],
+            })),
+            crawledPages: persistedOutput.pages.map((p) => ({
+              url: p.normalizedUrl,
+              normalizedUrl: p.normalizedUrl,
+              statusCode: p.statusCode,
+              isIndexable: p.indexability === "INDEXABLE",
+              indexabilityStatus: p.indexability === "INDEXABLE" ? "Indexable" : "Non-Indexable",
+              canonicalUrl: p.canonicalUrl,
+              title: p.title,
+              metaDescription: p.metaDescription,
+              h1s: p.h1Summary ? [p.h1Summary] : [],
+              crawlDepth: p.crawlDepth,
+              responseTimeMs: p.responseMetadata?.responseTimeMs || 0,
+              wordCount: p.responseMetadata?.wordCount || 0,
+              classification: { primaryClass: "page", confidence: 1.0 },
+              outlinks: [],
+            })),
+            sitemapOrphans: [],
+            linkGraphSummary: {},
+            persistedAuditRun: persistedOutput.auditRun,
+            comparison: persistedOutput.comparison,
+          };
+
+      console.log(`[API /api/analyze FINAL PERSISTED RESULT]`, {
         auditId: siteAudit.auditId,
         pagesCount: siteAudit.crawledPages.length,
         issuesCount: siteAudit.issues.length,
@@ -596,6 +1497,656 @@ app.get("/api/lighthouse-runs/report", async (req, res) => {
   } catch (err) {
     console.error("PSI report error", (err as Error).message);
     return res.status(500).send("Unable to render Lighthouse report");
+  }
+});
+
+// ==========================================
+// PHASE 28B & 28C: AI SEARCH INTELLIGENCE ENDPOINTS
+// ==========================================
+
+// 1. Get On-Site AI Readiness Report (Phase 28B)
+app.get("/api/projects/:projectId/ai-search/readiness", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(project.projectId);
+    if (!latestAudit) return res.status(404).json({ error: "No audit runs found for project" });
+
+    const snapshot = await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId);
+    const payload = snapshot ? JSON.parse(snapshot.payloadJson) : null;
+    const crawledPages = payload?.crawlResult?.crawledPages || [];
+
+    const readinessReport = evaluateOnSiteAISearchReadiness(crawledPages);
+    return res.json({ ok: true, report: readinessReport });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 2. Get Project Knowledge Profile (Phase 28C)
+app.get("/api/projects/:projectId/ai-search/knowledge-profile", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(project.projectId);
+    if (!latestAudit) return res.status(404).json({ error: "No audit runs found for project" });
+
+    const snapshot = await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId);
+    const payload = snapshot ? JSON.parse(snapshot.payloadJson) : null;
+    const crawledPages = payload?.crawlResult?.crawledPages || [];
+
+    const { profile } = generateProjectKnowledgeAndPromptUniverse(
+      project.projectId,
+      project.normalizedDomain,
+      crawledPages
+    );
+
+    return res.json({ ok: true, profile });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 3. Confirm Knowledge Item
+app.post("/api/projects/:projectId/ai-search/knowledge-profile/confirm-item", async (req, res) => {
+  try {
+    const { itemId } = req.body || {};
+    if (!itemId) return res.status(400).json({ error: "itemId is required" });
+    globalKnowledgeGovernance.confirmItem(req.params.projectId, itemId);
+    return res.json({ ok: true, confirmedItemId: itemId });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 4. Reject Knowledge Item
+app.post("/api/projects/:projectId/ai-search/knowledge-profile/reject-item", async (req, res) => {
+  try {
+    const { itemId } = req.body || {};
+    if (!itemId) return res.status(400).json({ error: "itemId is required" });
+    globalKnowledgeGovernance.rejectItem(req.params.projectId, itemId);
+    return res.json({ ok: true, rejectedItemId: itemId });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 5. Edit Knowledge Item
+app.post("/api/projects/:projectId/ai-search/knowledge-profile/edit-item", async (req, res) => {
+  try {
+    const { itemId, updates } = req.body || {};
+    if (!itemId || !updates) return res.status(400).json({ error: "itemId and updates required" });
+    globalKnowledgeGovernance.editItem(req.params.projectId, itemId, updates);
+    return res.json({ ok: true, editedItemId: itemId });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 6. Get Prompt Universe (Phase 28C)
+app.get("/api/projects/:projectId/ai-search/prompts", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(project.projectId);
+    if (!latestAudit) return res.status(404).json({ error: "No audit runs found for project" });
+
+    const snapshot = await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId);
+    const payload = snapshot ? JSON.parse(snapshot.payloadJson) : null;
+    const crawledPages = payload?.crawlResult?.crawledPages || [];
+
+    const { promptUniverse } = generateProjectKnowledgeAndPromptUniverse(
+      project.projectId,
+      project.normalizedDomain,
+      crawledPages
+    );
+
+    return res.json({ ok: true, promptUniverse });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ==========================================
+// PHASE 28D: LIVE AI VISIBILITY OBSERVATION ENDPOINTS
+// ==========================================
+
+// 7. Get Provider Capabilities
+app.get("/api/projects/:projectId/ai-search/providers", async (_req, res) => {
+  try {
+    const capabilities = globalAIObservationEngine.getProviderCapabilities();
+    return res.json({ ok: true, providers: capabilities });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 8. Estimate Observation Run Requests
+app.post("/api/projects/:projectId/ai-search/observations/estimate", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(project.projectId);
+    const snapshot = latestAudit ? await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId) : null;
+    const payload = snapshot ? JSON.parse(snapshot.payloadJson) : null;
+    const crawledPages = payload?.crawlResult?.crawledPages || [];
+
+    const { promptUniverse } = generateProjectKnowledgeAndPromptUniverse(
+      project.projectId,
+      project.normalizedDomain,
+      crawledPages
+    );
+
+    const config = req.body || {};
+    const estimate = globalAIObservationEngine.estimateObservationRequests(
+      config,
+      promptUniverse.allCandidates
+    );
+
+    return res.json({ ok: true, estimate });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 9. Execute Live AI Observation Run
+app.post("/api/projects/:projectId/ai-search/observations/run", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(project.projectId);
+    const snapshot = latestAudit ? await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId) : null;
+    const payload = snapshot ? JSON.parse(snapshot.payloadJson) : null;
+    const crawledPages = payload?.crawlResult?.crawledPages || [];
+
+    const { profile, promptUniverse } = generateProjectKnowledgeAndPromptUniverse(
+      project.projectId,
+      project.normalizedDomain,
+      crawledPages
+    );
+
+    const config = {
+      projectId: project.projectId,
+      promptTier: req.body?.promptTier || "TIER_1",
+      selectedPromptIds: req.body?.selectedPromptIds,
+      selectedClusterIds: req.body?.selectedClusterIds,
+      providers: req.body?.providers || ["OPENAI", "GEMINI", "PERPLEXITY"],
+      samplingMode: req.body?.samplingMode || "QUICK",
+      runsPerPrompt: req.body?.runsPerPrompt || 1,
+      country: req.body?.country || "US",
+      language: req.body?.language || "en",
+    };
+
+    const runSummary = await globalAIObservationEngine.executeObservationRun(
+      config,
+      profile,
+      promptUniverse
+    );
+
+    return res.json({ ok: true, runSummary });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 10. List Observation Runs History
+app.get("/api/projects/:projectId/ai-search/observations/runs", async (req, res) => {
+  try {
+    const runs = globalAIObservationEngine.getObservationRuns(req.params.projectId);
+    return res.json({ ok: true, runs });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 11. Get Observations for Run
+app.get("/api/projects/:projectId/ai-search/observations/runs/:runId/observations", async (req, res) => {
+  try {
+    const observations = globalAIObservationEngine.getObservationsForRun(req.params.runId);
+    return res.json({ ok: true, observations });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 12. Manual Import Observation
+app.post("/api/projects/:projectId/ai-search/observations/manual-import", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(project.projectId);
+    const snapshot = latestAudit ? await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId) : null;
+    const payload = snapshot ? JSON.parse(snapshot.payloadJson) : null;
+    const crawledPages = payload?.crawlResult?.crawledPages || [];
+
+    const { profile, promptUniverse } = generateProjectKnowledgeAndPromptUniverse(
+      project.projectId,
+      project.normalizedDomain,
+      crawledPages
+    );
+
+    const { promptText, responseText, sourceEngineName, citations } = req.body || {};
+    if (!promptText || !responseText) {
+      return res.status(400).json({ error: "promptText and responseText are required." });
+    }
+
+    const matchedPrompt = promptUniverse.allCandidates.find(
+      (p) => p.prompt.toLowerCase() === promptText.trim().toLowerCase()
+    );
+
+    const observation = globalAIObservationEngine.importManualObservation(
+      { promptText, responseText, sourceEngineName, citations },
+      profile,
+      matchedPrompt
+    );
+
+    return res.json({ ok: true, observation });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ==========================================
+// PHASE 28E: AI VISIBILITY ANALYTICS ENDPOINTS
+// ==========================================
+
+const analyticsRepo = new SqliteAnalyticsRepository(persistence.db);
+
+// 13. Get Latest Analytics Snapshot
+app.get("/api/projects/:projectId/ai-search/analytics/latest", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    // Check if snapshot exists
+    let snapshot = analyticsRepo.getLatestSnapshotForProject(project.projectId);
+    if (!snapshot) {
+      // If no snapshot exists, derive from latest observation run and observations
+      const runs = globalAIObservationEngine.getObservationRuns(project.projectId, 1);
+      if (runs.length > 0) {
+        const latestRun = runs[0];
+        const observations = globalAIObservationEngine.getObservationsForRun(latestRun.runId);
+
+        const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(project.projectId);
+        const auditSnapshot = latestAudit ? await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId) : null;
+        const payload = auditSnapshot ? JSON.parse(auditSnapshot.payloadJson) : null;
+        const crawledPages = payload?.crawlResult?.crawledPages || [];
+
+        const { profile, promptUniverse } = generateProjectKnowledgeAndPromptUniverse(
+          project.projectId,
+          project.normalizedDomain,
+          crawledPages
+        );
+
+        snapshot = globalAIVisibilityAnalyticsEngine.computeAnalytics(
+          project.projectId,
+          latestRun.runId,
+          observations,
+          profile,
+          promptUniverse
+        );
+
+        analyticsRepo.saveAnalyticsSnapshot(snapshot);
+      }
+    }
+
+    return res.json({ ok: true, snapshot });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 14. Recalculate Analytics from Persisted Observations (Zero Provider Calls)
+app.post("/api/projects/:projectId/ai-search/analytics/recalculate", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const runs = globalAIObservationEngine.getObservationRuns(project.projectId, 1);
+    if (runs.length === 0) {
+      return res.status(400).json({ error: "No observation runs exist to calculate analytics." });
+    }
+
+    const latestRun = runs[0];
+    const observations = globalAIObservationEngine.getObservationsForRun(latestRun.runId);
+
+    const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(project.projectId);
+    const auditSnapshot = latestAudit ? await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId) : null;
+    const payload = auditSnapshot ? JSON.parse(auditSnapshot.payloadJson) : null;
+    const crawledPages = payload?.crawlResult?.crawledPages || [];
+
+    const { profile, promptUniverse } = generateProjectKnowledgeAndPromptUniverse(
+      project.projectId,
+      project.normalizedDomain,
+      crawledPages
+    );
+
+    const snapshot = globalAIVisibilityAnalyticsEngine.computeAnalytics(
+      project.projectId,
+      latestRun.runId,
+      observations,
+      profile,
+      promptUniverse
+    );
+
+    analyticsRepo.saveAnalyticsSnapshot(snapshot);
+    return res.json({ ok: true, snapshot });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 15. Get Longitudinal Trends and Run Comparisons
+app.get("/api/projects/:projectId/ai-search/analytics/trends", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const runs = globalAIObservationEngine.getObservationRuns(project.projectId, 20);
+    const snapshots = analyticsRepo.listSnapshotsForProject(project.projectId, 20);
+
+    const trends = globalAIVisibilityTrendEngine.computeProjectTrends(
+      project.projectId,
+      runs,
+      snapshots
+    );
+
+    // If at least 2 runs, compare latest two
+    if (runs.length >= 2) {
+      const currentRun = runs[0];
+      const baselineRun = runs[1];
+      const currentObs = globalAIObservationEngine.getObservationsForRun(currentRun.runId);
+      const baselineObs = globalAIObservationEngine.getObservationsForRun(baselineRun.runId);
+
+      trends.latestComparison = globalAIVisibilityTrendEngine.compareRuns(
+        baselineRun,
+        baselineObs,
+        currentRun,
+        currentObs
+      );
+    }
+
+    return res.json({ ok: true, trends });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ==========================================
+// PHASE 28F: AI CITATION & SOURCE INTELLIGENCE ENDPOINTS
+// ==========================================
+
+const citationRepo = new SqliteCitationRepository(persistence.db);
+
+// 16. Get Latest Citation Intelligence Snapshot
+app.get("/api/projects/:projectId/ai-search/citations/latest", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    let snapshot = citationRepo.getLatestSnapshotForProject(project.projectId);
+    if (!snapshot) {
+      const runs = globalAIObservationEngine.getObservationRuns(project.projectId, 1);
+      if (runs.length > 0) {
+        const latestRun = runs[0];
+        const observations = globalAIObservationEngine.getObservationsForRun(latestRun.runId);
+
+        const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(project.projectId);
+        const auditSnapshot = latestAudit ? await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId) : null;
+        const payload = auditSnapshot ? JSON.parse(auditSnapshot.payloadJson) : null;
+        const crawledPages = payload?.crawlResult?.crawledPages || [];
+
+        const { profile, promptUniverse } = generateProjectKnowledgeAndPromptUniverse(
+          project.projectId,
+          project.normalizedDomain,
+          crawledPages
+        );
+
+        snapshot = globalAISourceIntelligenceEngine.computeSourceIntelligence(
+          project.projectId,
+          latestRun.runId,
+          observations,
+          profile,
+          promptUniverse,
+          crawledPages
+        );
+
+        citationRepo.saveCitationSnapshot(snapshot);
+      }
+    }
+
+    return res.json({ ok: true, snapshot });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 17. Recalculate Citation Intelligence from Persisted Observations (Zero Provider Calls)
+app.post("/api/projects/:projectId/ai-search/citations/recalculate", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const runs = globalAIObservationEngine.getObservationRuns(project.projectId, 1);
+    if (runs.length === 0) {
+      return res.status(400).json({ error: "No observation runs exist to calculate citation intelligence." });
+    }
+
+    const latestRun = runs[0];
+    const observations = globalAIObservationEngine.getObservationsForRun(latestRun.runId);
+
+    const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(project.projectId);
+    const auditSnapshot = latestAudit ? await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId) : null;
+    const payload = auditSnapshot ? JSON.parse(auditSnapshot.payloadJson) : null;
+    const crawledPages = payload?.crawlResult?.crawledPages || [];
+
+    const { profile, promptUniverse } = generateProjectKnowledgeAndPromptUniverse(
+      project.projectId,
+      project.normalizedDomain,
+      crawledPages
+    );
+
+    const snapshot = globalAISourceIntelligenceEngine.computeSourceIntelligence(
+      project.projectId,
+      latestRun.runId,
+      observations,
+      profile,
+      promptUniverse,
+      crawledPages
+    );
+
+    citationRepo.saveCitationSnapshot(snapshot);
+    return res.json({ ok: true, snapshot });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 18. Get Citation Gaps
+app.get("/api/projects/:projectId/ai-search/citations/gaps", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const snapshot = citationRepo.getLatestSnapshotForProject(project.projectId);
+    const gaps = snapshot?.gaps || [];
+
+    return res.json({ ok: true, gaps });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ==========================================
+// PHASE 28G: AI VISIBILITY OPTIMIZATION & FIX INTELLIGENCE ENDPOINTS
+// ==========================================
+
+const optimizationRepo = new SqliteOptimizationRepository(persistence.db);
+const optimizationVerifier = new AIOptimizationVerifier();
+
+// 19. Get Latest Optimization Snapshot
+app.get("/api/projects/:projectId/ai-search/optimization/latest", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    let snapshot = optimizationRepo.getLatestSnapshot(project.projectId);
+    if (!snapshot) {
+      const runs = globalAIObservationEngine.getObservationRuns(project.projectId, 1);
+      const latestRun = runs[0];
+      const observations = latestRun ? globalAIObservationEngine.getObservationsForRun(latestRun.runId) : [];
+
+      const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(project.projectId);
+      const auditSnapshot = latestAudit ? await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId) : null;
+      const payload = auditSnapshot ? JSON.parse(auditSnapshot.payloadJson) : null;
+      const crawledPages = payload?.crawlResult?.crawledPages || [];
+
+      const { profile, promptUniverse } = generateProjectKnowledgeAndPromptUniverse(
+        project.projectId,
+        project.normalizedDomain,
+        crawledPages
+      );
+
+      const pageContexts = crawledPages.map((p: any) => ({
+        url: p.pageUrl || p.url,
+        title: p.rawFacts?.title || p.title,
+        metaDescription: p.rawFacts?.metaDescription || p.metaDescription,
+        h1Texts: p.rawFacts?.h1Texts || (p.rawFacts?.h1Count > 0 ? [p.rawFacts?.title] : []),
+        headings: p.headingsOutline?.map((h: any) => h.text) || [],
+        visibleText: p.rawFacts?.visibleTextSample || p.text || "",
+        schemaTypes: p.jsonLdBlocks?.flatMap((j: any) => j.types || []) || [],
+      }));
+
+      snapshot = globalAIOptimizationEngine.computeOptimizationSnapshot(
+        project.projectId,
+        latestRun?.runId || "run_init",
+        profile,
+        promptUniverse,
+        observations,
+        pageContexts
+      );
+
+      optimizationRepo.saveSnapshot(snapshot);
+    }
+
+    return res.json({ ok: true, snapshot });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 20. Generate Fresh Optimization Snapshot
+app.post("/api/projects/:projectId/ai-search/optimization/generate", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const runs = globalAIObservationEngine.getObservationRuns(project.projectId, 1);
+    const latestRun = runs[0];
+    const observations = latestRun ? globalAIObservationEngine.getObservationsForRun(latestRun.runId) : [];
+
+    const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(project.projectId);
+    const auditSnapshot = latestAudit ? await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId) : null;
+    const payload = auditSnapshot ? JSON.parse(auditSnapshot.payloadJson) : null;
+    const crawledPages = payload?.crawlResult?.crawledPages || [];
+
+    const { profile, promptUniverse } = generateProjectKnowledgeAndPromptUniverse(
+      project.projectId,
+      project.normalizedDomain,
+      crawledPages
+    );
+
+    const pageContexts = crawledPages.map((p: any) => ({
+      url: p.pageUrl || p.url,
+      title: p.rawFacts?.title || p.title,
+      metaDescription: p.rawFacts?.metaDescription || p.metaDescription,
+      h1Texts: p.rawFacts?.h1Texts || (p.rawFacts?.h1Count > 0 ? [p.rawFacts?.title] : []),
+      headings: p.headingsOutline?.map((h: any) => h.text) || [],
+      visibleText: p.rawFacts?.visibleTextSample || p.text || "",
+      schemaTypes: p.jsonLdBlocks?.flatMap((j: any) => j.types || []) || [],
+    }));
+
+    const snapshot = globalAIOptimizationEngine.computeOptimizationSnapshot(
+      project.projectId,
+      latestRun?.runId || "run_init",
+      profile,
+      promptUniverse,
+      observations,
+      pageContexts
+    );
+
+    optimizationRepo.saveSnapshot(snapshot);
+    return res.json({ ok: true, snapshot });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 21. Verify Finding Remediation (Level 1 and Level 2)
+app.post("/api/projects/:projectId/ai-search/optimization/verify-finding", async (req, res) => {
+  try {
+    const { findingId } = req.body;
+    if (!findingId) return res.status(400).json({ error: "Missing findingId" });
+
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const snapshot = optimizationRepo.getLatestSnapshot(project.projectId);
+    if (!snapshot) return res.status(404).json({ error: "No optimization snapshot found" });
+
+    const finding = snapshot.findings.find((f) => f.id === findingId);
+    if (!finding) return res.status(404).json({ error: "Finding not found in latest snapshot" });
+
+    const runs = globalAIObservationEngine.getObservationRuns(project.projectId, 1);
+    const latestRun = runs[0];
+    const observations = latestRun ? globalAIObservationEngine.getObservationsForRun(latestRun.runId) : [];
+
+    const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(project.projectId);
+    const auditSnapshot = latestAudit ? await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId) : null;
+    const payload = auditSnapshot ? JSON.parse(auditSnapshot.payloadJson) : null;
+    const crawledPages = payload?.crawlResult?.crawledPages || [];
+
+    const { profile } = generateProjectKnowledgeAndPromptUniverse(
+      project.projectId,
+      project.normalizedDomain,
+      crawledPages
+    );
+
+    const pageContexts = crawledPages.map((p: any) => ({
+      url: p.pageUrl || p.url,
+      title: p.rawFacts?.title || p.title,
+      metaDescription: p.rawFacts?.metaDescription || p.metaDescription,
+      h1Texts: p.rawFacts?.h1Texts || (p.rawFacts?.h1Count > 0 ? [p.rawFacts?.title] : []),
+      headings: p.headingsOutline?.map((h: any) => h.text) || [],
+      visibleText: p.rawFacts?.visibleTextSample || p.text || "",
+      schemaTypes: p.jsonLdBlocks?.flatMap((j: any) => j.types || []) || [],
+    }));
+
+    const result = optimizationVerifier.verifyRemediation(finding, pageContexts, observations, profile);
+    optimizationRepo.updateFindingLifecycle(findingId, result.updatedStatus);
+
+    return res.json({ ok: true, result });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 22. Update Finding Lifecycle Status
+app.post("/api/projects/:projectId/ai-search/optimization/update-status", async (req, res) => {
+  try {
+    const { findingId, status } = req.body;
+    if (!findingId || !status) return res.status(400).json({ error: "Missing findingId or status" });
+
+    optimizationRepo.updateFindingLifecycle(findingId, status);
+    return res.json({ ok: true, findingId, status });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
   }
 });
 

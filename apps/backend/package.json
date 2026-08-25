@@ -9,6 +9,7 @@
     "render-build": "npx playwright install --with-deps chromium && tsc -p tsconfig.json",
     "postinstall": "npx playwright install chromium || true",
     "verify:release": "tsx src/crawler/verification/release-orchestrator.ts",
+    "verify:local-accuracy": "tsx src/crawler/verification/local-accuracy-orchestrator.ts",
     "verify:deployed": "tsx src/crawler/verification/verify-deployed-service.ts",
     "start": "node dist/index.js"
   },

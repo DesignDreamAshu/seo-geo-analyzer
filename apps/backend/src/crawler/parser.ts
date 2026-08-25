@@ -16,6 +16,8 @@ import type {
   RenderMode,
   ResourceAsset,
   Soft404Status,
+  OgImageFetchState,
+  OpenGraphData,
 } from "./types";
 
 /**
@@ -92,7 +94,9 @@ export function extractForms($: cheerio.CheerioAPI): FormFact[] {
     $form.find("input, select, textarea").each((_, ctrlEl) => {
       const $ctrl = $(ctrlEl);
       const tag = (ctrlEl as any).tagName?.toLowerCase() || "input";
-      const type = $ctrl.attr("type")?.toLowerCase() || (tag === "textarea" ? "textarea" : "text");
+      const type =
+        $ctrl.attr("type")?.toLowerCase() ||
+        (tag === "textarea" ? "textarea" : tag === "select" ? "select" : "text");
       const name = $ctrl.attr("name");
       const id = $ctrl.attr("id");
 
@@ -105,9 +109,13 @@ export function extractForms($: cheerio.CheerioAPI): FormFact[] {
       let isLabelled = false;
 
       // 1. aria-label or aria-labelledby
-      const ariaLabel = $ctrl.attr("aria-label")?.trim();
+      const ariaLabel = $ctrl.attr("aria-label")?.trim() || null;
+      const ariaLabelledBy = $ctrl.attr("aria-labelledby")?.trim() || null;
       if (ariaLabel) {
         accessibleName = ariaLabel;
+        isLabelled = true;
+      } else if (ariaLabelledBy) {
+        accessibleName = ariaLabelledBy;
         isLabelled = true;
       }
 
@@ -130,24 +138,36 @@ export function extractForms($: cheerio.CheerioAPI): FormFact[] {
       }
 
       // 4. title or placeholder fallback
+      const placeholder = $ctrl.attr("placeholder")?.trim() || undefined;
+      const titleAttr = $ctrl.attr("title")?.trim() || undefined;
       if (!isLabelled) {
-        const title = $ctrl.attr("title")?.trim();
-        if (title) {
-          accessibleName = title;
+        if (titleAttr) {
+          accessibleName = titleAttr;
           isLabelled = true;
-        } else {
-          const placeholder = $ctrl.attr("placeholder")?.trim();
-          if (placeholder) {
-            accessibleName = placeholder;
-          }
+        } else if (placeholder) {
+          accessibleName = placeholder;
         }
       }
+
+      // Build concise, non-fabricated snippet
+      const attrParts: string[] = [];
+      if (name) attrParts.push(`name="${name}"`);
+      if (type && !(tag === "textarea" && type === "textarea")) attrParts.push(`type="${type}"`);
+      if (id) attrParts.push(`id="${id}"`);
+      if (placeholder) attrParts.push(`placeholder="${placeholder.slice(0, 30)}"`);
+      if (ariaLabel) attrParts.push(`aria-label="${ariaLabel.slice(0, 30)}"`);
+      if (ariaLabelledBy) attrParts.push(`aria-labelledby="${ariaLabelledBy}"`);
+      const snippet = `<${tag}${attrParts.length > 0 ? " " + attrParts.join(" ") : ""}>`;
 
       controls.push({
         tag,
         type,
         name,
         id,
+        placeholder,
+        ariaLabel,
+        ariaLabelledBy,
+        snippet,
         accessibleName,
         isLabelled,
       });
@@ -176,10 +196,13 @@ export interface WordCountBreakdown {
   mainContentText: string;
   mainContentWordCount: number;
   wordCount: number;
+  mainRootSelector?: string;
+  mainContentEvaluation?: "comparable" | "heuristic" | "not_comparable";
 }
 
 /**
- * Extracts clean text populations: raw document, visible body (excluding chrome), and main content container.
+ * Extracts clean text populations: raw document, visible body (excluding chrome), and main content container
+ * following the canonical semantic hierarchy: main -> [role='main'] -> article -> recognized content roots.
  */
 export function extractDetailedWordCounts($: cheerio.CheerioAPI): WordCountBreakdown {
   // 1. Raw Document Text (stripping only non-content machine tags)
@@ -190,22 +213,50 @@ export function extractDetailedWordCounts($: cheerio.CheerioAPI): WordCountBreak
 
   // 2. Visible Body Text (stripping nav, footer, header chrome)
   const bodyClone = $.load($.html());
-  bodyClone("script, style, noscript, svg, nav, footer, header, [role='navigation'], [role='banner'], .cookie-banner, #cookie-notice, .modal, .popup").remove();
+  bodyClone("script, style, noscript, svg, nav, footer, header, [role='navigation'], [role='banner'], .cookie-banner, #cookie-notice, .modal, .popup, [aria-hidden='true']").remove();
   const visBodyText = bodyClone("body").text().replace(/\s+/g, " ").trim();
   const visBodyWords = visBodyText ? visBodyText.split(/\s+/).filter(Boolean).length : 0;
 
-  // 3. Main Content Text (focusing on <main> or [role='main'] or #main-content)
+  // 3. Main Content Semantic Root Hierarchy
   let mainText = "";
   let mainWords = 0;
-  const mainEl = $("main, [role='main'], #main-content, .main-content");
-  if (mainEl.length > 0) {
-    const mainClone = $.load(mainEl.first().html() || "");
-    mainClone("script, style, noscript, svg, nav, footer, header").remove();
-    mainText = mainClone.text().replace(/\s+/g, " ").trim();
-    mainWords = mainText ? mainText.split(/\s+/).filter(Boolean).length : 0;
-  } else {
+  let mainRootSelector: string | undefined = undefined;
+  let mainContentEvaluation: "comparable" | "heuristic" | "not_comparable" = "heuristic";
+
+  const semanticSelectors = [
+    "main",
+    "[role='main']",
+    "article",
+    "#main-content",
+    ".main-content",
+    ".post-content",
+    ".entry-content",
+    "[data-main-content]",
+    "#content",
+    ".content-area",
+  ];
+
+  for (const sel of semanticSelectors) {
+    const el = $(sel);
+    if (el.length > 0) {
+      const clone = $.load(el.first().html() || "");
+      clone("script, style, noscript, svg, nav, footer, header, [role='navigation'], [role='banner'], .cookie-banner, #cookie-notice, .modal, .popup, [aria-hidden='true']").remove();
+      const text = clone.text().replace(/\s+/g, " ").trim();
+      const words = text ? text.split(/\s+/).filter(Boolean).length : 0;
+      if (words > 0) {
+        mainText = text;
+        mainWords = words;
+        mainRootSelector = sel;
+        mainContentEvaluation = "comparable";
+        break;
+      }
+    }
+  }
+
+  if (!mainRootSelector) {
     mainText = visBodyText;
     mainWords = visBodyWords;
+    mainContentEvaluation = visBodyWords > 0 ? "heuristic" : "not_comparable";
   }
 
   return {
@@ -216,6 +267,8 @@ export function extractDetailedWordCounts($: cheerio.CheerioAPI): WordCountBreak
     mainContentText: mainText,
     mainContentWordCount: mainWords,
     wordCount: mainWords > 0 ? mainWords : visBodyWords,
+    mainRootSelector,
+    mainContentEvaluation,
   };
 }
 
@@ -253,7 +306,7 @@ export function classifyPage(
   }
 
   // 1. Sitemaps
-  if (path.includes("sitemap") || path.endsWith(".xml")) {
+  if (path.endsWith(".xml") || path === "/sitemap" || path === "/sitemap.xml" || (path.includes("sitemap") && path.endsWith(".xml"))) {
     signals.push("xml_sitemap_path");
     return { primaryClass: "sitemap_resource", confidence: 1.0, signals };
   }
@@ -340,6 +393,53 @@ export function classifyPage(
 }
 
 /**
+ * Validates sequential heading hierarchy from an existing outline of headings.
+ * Guarantees that outlines with < 2 main content headings are valid by definition.
+ */
+export function validateHeadingOutlineHierarchy(outline: HeadingOutlineItem[]): {
+  valid: boolean;
+  issues: string[];
+  skippedTransitions: Array<{ fromLevel: number; toLevel: number; fromText: string; toText: string; selector?: string }>;
+} {
+  const issues: string[] = [];
+  const skippedTransitions: Array<{ fromLevel: number; toLevel: number; fromText: string; toText: string; selector?: string }> = [];
+
+  const mainHeadings = (outline || []).filter((h) => h && h.inMainContent);
+  if (mainHeadings.length < 2) {
+    return {
+      valid: true,
+      issues: [],
+      skippedTransitions: [],
+    };
+  }
+
+  let previousLevel = 0;
+  let previousText = "";
+
+  for (const h of mainHeadings) {
+    if (previousLevel > 0 && h.level > previousLevel + 1) {
+      const transitionMsg = `Skipped <h${previousLevel + 1}>: <h${previousLevel}> "${previousText.slice(0, 35)}" followed directly by <h${h.level}> "${h.text.slice(0, 35)}"`;
+      issues.push(transitionMsg);
+      skippedTransitions.push({
+        fromLevel: previousLevel,
+        toLevel: h.level,
+        fromText: previousText,
+        toText: h.text,
+        selector: h.domSelector,
+      });
+    }
+    previousLevel = h.level;
+    previousText = h.text;
+  }
+
+  return {
+    valid: issues.length === 0,
+    issues,
+    skippedTransitions,
+  };
+}
+
+/**
  * Validates the heading hierarchy in the DOM context and extracts outline with evidence.
  */
 export function extractAndValidateHeadings($: cheerio.CheerioAPI): {
@@ -349,16 +449,13 @@ export function extractAndValidateHeadings($: cheerio.CheerioAPI): {
   issues: string[];
   skippedTransitions: Array<{ fromLevel: number; toLevel: number; fromText: string; toText: string; selector?: string }>;
 } {
-  const issues: string[] = [];
   const h1s: string[] = [];
   const outline: HeadingOutlineItem[] = [];
-  const skippedTransitions: Array<{ fromLevel: number; toLevel: number; fromText: string; toText: string; selector?: string }> = [];
 
   $("h1, h2, h3, h4, h5, h6").each((_, el) => {
     const tagName = (el as any).tagName?.toLowerCase() || "h1";
     const level = parseInt(tagName.replace("h", ""), 10) || 1;
     const text = $(el).text().replace(/\s+/g, " ").trim();
-    if (!text) return;
 
     // Identify context container
     const isNav = $(el).parents("nav, [role='navigation'], .nav, .navbar, .menu").length > 0;
@@ -388,34 +485,28 @@ export function extractAndValidateHeadings($: cheerio.CheerioAPI): {
     outline.push(item);
   });
 
-  // Check skipped levels in main content only (avoiding nav/footer false positives)
-  const mainHeadings = outline.filter((h) => h.inMainContent);
-  let previousLevel = 0;
-  let previousText = "";
-
-  for (const h of mainHeadings) {
-    if (previousLevel > 0 && h.level > previousLevel + 1) {
-      const transitionMsg = `Skipped <h${previousLevel + 1}>: <h${previousLevel}> "${previousText.slice(0, 35)}" followed directly by <h${h.level}> "${h.text.slice(0, 35)}"`;
-      issues.push(transitionMsg);
-      skippedTransitions.push({
-        fromLevel: previousLevel,
-        toLevel: h.level,
-        fromText: previousText,
-        toText: h.text,
-        selector: h.domSelector,
-      });
-    }
-    previousLevel = h.level;
-    previousText = h.text;
-  }
+  const validation = validateHeadingOutlineHierarchy(outline);
 
   return {
     h1s,
     outline,
-    valid: issues.length === 0,
-    issues,
-    skippedTransitions,
+    valid: validation.valid,
+    issues: validation.issues,
+    skippedTransitions: validation.skippedTransitions,
   };
+}
+
+/**
+ * Convenience helper to parse HTML string directly for testing and auditing.
+ */
+export function parsePageHtml(
+  html: string,
+  url: string,
+  seedUrl = url,
+  statusCode = 200,
+  headers: Record<string, string | string[] | undefined> = {}
+): CrawledPageData {
+  return parseHtmlPage(url, url, url, statusCode, [], html, headers, 200, 0, seedUrl);
 }
 
 /**
@@ -442,8 +533,183 @@ export function parseHtmlPage(
 
   // Basic Metadata
   const title = $("title").first().text().trim() || null;
-  const metaDescription = $('meta[name="description" i]').attr("content")?.trim() || null;
-  const canonicalHref = $('link[rel="canonical" i]').attr("href")?.trim() || null;
+  const titleTagsCount = $("title").length;
+  const metaDescription = $('meta[name="description" i]').first().attr("content")?.trim() || null;
+  const metaDescriptionTagsCount = $('meta[name="description" i]').length;
+  const htmlLang = $("html").attr("lang")?.trim() || null;
+
+  // Compression Header Check
+  const contentEncoding = String(headers["content-encoding"] || "").toLowerCase();
+  const isCompressionEnabled = contentEncoding.includes("gzip") || contentEncoding.includes("br") || contentEncoding.includes("deflate") || contentEncoding.includes("zstd");
+
+  // Button Accessibility Extraction (W3C Accessible Name standard)
+  const buttons: import("./types").ButtonFact[] = [];
+  $('button, input[type="button"], input[type="submit"], input[type="reset"], [role="button"]').each((_, el) => {
+    const $el = $(el);
+    const tag = (el.tagName || "button").toLowerCase();
+    const text = $el.text().replace(/\s+/g, " ").trim();
+    const ariaLabel = $el.attr("aria-label")?.trim() || null;
+    const ariaLabelledBy = $el.attr("aria-labelledby")?.trim() || null;
+    const titleAttr = $el.attr("title")?.trim() || null;
+    const valueAttr = $el.attr("value")?.trim() || null;
+
+    let accessibleName = "";
+    if (ariaLabel) {
+      accessibleName = ariaLabel;
+    } else if (ariaLabelledBy) {
+      const labelledEl = $(`#${ariaLabelledBy}`);
+      if (labelledEl.length > 0) accessibleName = labelledEl.text().trim();
+    } else if (text) {
+      accessibleName = text;
+    } else if (valueAttr && (tag === "input" || tag === "button")) {
+      accessibleName = valueAttr;
+    } else if (titleAttr) {
+      accessibleName = titleAttr;
+    } else {
+      const imgAlt = $el.find("img[alt]").attr("alt")?.trim();
+      if (imgAlt) accessibleName = imgAlt;
+      const svgAria = $el.find("svg[aria-label]").attr("aria-label")?.trim() || $el.find("svg title").text().trim();
+      if (svgAria) accessibleName = svgAria;
+    }
+
+    const isLabelled = accessibleName.length > 0;
+    const id = $el.attr("id");
+    const domSelector = id ? `#${id}` : `${tag}${text ? `:contains("${text.slice(0, 15)}")` : ""}`;
+
+    buttons.push({
+      tag,
+      text,
+      ariaLabel,
+      ariaLabelledBy,
+      accessibleName,
+      isLabelled,
+      domSelector,
+    });
+  });
+
+  // Iframe Accessible Title Extraction
+  const iframes: import("./types").IframeFact[] = [];
+  $("iframe").each((_, el) => {
+    const $el = $(el);
+    const src = $el.attr("src")?.trim() || null;
+    const iframeTitle = $el.attr("title")?.trim() || null;
+    const name = $el.attr("name")?.trim() || null;
+    const ariaHidden = $el.attr("aria-hidden") === "true";
+    const style = $el.attr("style") || "";
+    const isHidden = ariaHidden || style.includes("display:none") || style.includes("display: none") || $el.attr("hidden") !== undefined || $el.attr("width") === "0" || $el.attr("height") === "0";
+    const id = $el.attr("id");
+    const domSelector = id ? `iframe#${id}` : (src ? `iframe[src="${src.slice(0, 30)}"]` : "iframe");
+
+    iframes.push({
+      src,
+      title: iframeTitle,
+      name,
+      isHidden,
+      domSelector,
+    });
+  });
+
+  // Charset Extraction (W3C standard: <meta charset="...">, <meta http-equiv="Content-Type">, or HTTP header)
+  let htmlCharset: string | null = null;
+  const metaCharset = $('meta[charset]').first().attr("charset")?.trim();
+  const metaHttpEquiv = $('meta[http-equiv="content-type" i]').first().attr("content")?.trim();
+  const headerContentType = String(headers["content-type"] || "");
+
+  if (metaCharset) {
+    htmlCharset = metaCharset;
+  } else if (metaHttpEquiv && metaHttpEquiv.toLowerCase().includes("charset=")) {
+    const match = metaHttpEquiv.match(/charset=([a-zA-Z0-9_\-]+)/i);
+    if (match) htmlCharset = match[1];
+  } else if (headerContentType && headerContentType.toLowerCase().includes("charset=")) {
+    const match = headerContentType.match(/charset=([a-zA-Z0-9_\-]+)/i);
+    if (match) htmlCharset = match[1];
+  }
+  const hasValidCharset = Boolean(htmlCharset && htmlCharset.length >= 2);
+
+  // Deprecated HTML Tags (obsolete presentational elements)
+  const deprecatedTagList = ["marquee", "blink", "font", "center", "applet", "frame", "frameset", "dir", "isindex", "strike", "basefont"];
+  const deprecatedHtmlTags = deprecatedTagList.filter((tag) => $(tag).length > 0);
+
+  // External links with target="_blank" missing rel="noopener/noreferrer"
+  const targetBlankWithoutNoopenerLinks: Array<{ href: string; text: string; rel: string | null }> = [];
+  let currentHost = "";
+  try {
+    currentHost = new URL(finalUrl).hostname.toLowerCase();
+  } catch {}
+
+  $('a[target="_blank" i]').each((_, el) => {
+    const $a = $(el);
+    const href = $a.attr("href")?.trim() || "";
+    const rel = $a.attr("rel")?.toLowerCase().trim() || null;
+    if (href.startsWith("http://") || href.startsWith("https://")) {
+      try {
+        const linkHost = new URL(href).hostname.toLowerCase();
+        if (linkHost && currentHost && linkHost !== currentHost && !linkHost.endsWith(`.${currentHost}`)) {
+          const hasNoopener = rel && (rel.includes("noopener") || rel.includes("noreferrer"));
+          if (!hasNoopener) {
+            targetBlankWithoutNoopenerLinks.push({
+              href,
+              text: $a.text().replace(/\s+/g, " ").trim().slice(0, 50),
+              rel,
+            });
+          }
+        }
+      } catch {}
+    }
+  });
+
+  // Image Lazy Loading Check (exclude top 2 images, hero, logo, header/nav images)
+  const sampleBelowFoldMissingLazy: string[] = [];
+  let belowFoldMissingCount = 0;
+  $("img").each((idx, el) => {
+    const $img = $(el);
+    const loadingAttr = $img.attr("loading")?.toLowerCase().trim();
+    const fetchPriority = $img.attr("fetchpriority")?.toLowerCase().trim();
+    const src = $img.attr("src")?.trim() || "";
+    const isHeroOrLogo =
+      $img.parents('header, nav, [role="banner"], .header, .nav, .navbar, .hero, .banner').length > 0 ||
+      ($img.attr("class") || "").toLowerCase().includes("logo") ||
+      ($img.attr("id") || "").toLowerCase().includes("logo") ||
+      ($img.attr("alt") || "").toLowerCase().includes("logo");
+
+    // First 2 images on page or hero/logo/high-priority are legitimately eager
+    if (idx < 2 || isHeroOrLogo || fetchPriority === "high") {
+      return;
+    }
+
+    if (loadingAttr !== "lazy" && src) {
+      belowFoldMissingCount++;
+      if (sampleBelowFoldMissingLazy.length < 5) {
+        sampleBelowFoldMissingLazy.push(src);
+      }
+    }
+  });
+  const lazyLoadingStats = {
+    belowFoldMissingLazyCount: belowFoldMissingCount,
+    sampleImageUrls: sampleBelowFoldMissingLazy,
+  };
+
+  // Canonical tags extraction (including position and multiples)
+  const allCanonicalTags: Array<{ href: string; inHead: boolean; isValidUrl: boolean; rawHref: string }> = [];
+  $('link[rel="canonical" i]').each((_, el) => {
+    const rawHref = $(el).attr("href")?.trim() || "";
+    const inHead = $(el).parents("head").length > 0 || $(el).parent().is("head");
+    const resolved = resolveAbsoluteHref(rawHref, finalUrl) || rawHref;
+    let isValidUrl = false;
+    try {
+      if (rawHref.startsWith("http://") || rawHref.startsWith("https://") || rawHref.startsWith("/")) {
+        isValidUrl = true;
+      }
+    } catch {}
+    allCanonicalTags.push({
+      rawHref,
+      href: resolved,
+      inHead,
+      isValidUrl,
+    });
+  });
+
+  const canonicalHref = allCanonicalTags[0]?.rawHref || null;
   const normalizedCanonical = canonicalHref ? normalizeUrl(canonicalHref, finalUrl) : null;
 
   const isCanonicalSelfReferencing = Boolean(
@@ -452,11 +718,79 @@ export function parseHtmlPage(
 
   // Meta Robots & X-Robots-Tag
   const metaRobots = $('meta[name="robots" i]').attr("content")?.trim() || null;
+  const googlebotMeta = $('meta[name="googlebot" i]').attr("content")?.trim() || null;
   const rawXRobots = headers["x-robots-tag"];
   const xRobotsTag = Array.isArray(rawXRobots) ? rawXRobots.join(", ") : (rawXRobots ? String(rawXRobots) : null);
 
-  const combinedRobotsDirectives = `${metaRobots || ""} ${xRobotsTag || ""}`.toLowerCase();
+  const combinedRobotsDirectives = `${metaRobots || ""} ${googlebotMeta || ""} ${xRobotsTag || ""}`.toLowerCase();
   const hasNoindex = combinedRobotsDirectives.includes("noindex");
+  const hasNofollow = combinedRobotsDirectives.includes("nofollow");
+
+  let robotsConflict = false;
+  let robotsConflictReason: string | undefined;
+  if (metaRobots && xRobotsTag) {
+    const metaHasNoindex = metaRobots.toLowerCase().includes("noindex");
+    const headerHasNoindex = xRobotsTag.toLowerCase().includes("noindex");
+    if (metaHasNoindex !== headerHasNoindex) {
+      robotsConflict = true;
+      robotsConflictReason = `HTML meta robots specifies "${metaRobots}" but HTTP X-Robots-Tag specifies "${xRobotsTag}"`;
+    }
+  }
+
+  const robotsDirectives = {
+    metaRobots,
+    googlebotMeta,
+    xRobotsTag,
+    hasNoindex,
+    hasNofollow,
+    conflict: robotsConflict,
+    conflictReason: robotsConflictReason,
+  };
+
+  // Mobile Viewport extraction
+  const viewportEl = $('meta[name="viewport" i]').first();
+  const viewportTagPresent = viewportEl.length > 0;
+  const viewportContent = viewportEl.attr("content")?.trim() || null;
+  const viewportIssues: string[] = [];
+  let isViewportValid = viewportTagPresent;
+
+  if (viewportTagPresent) {
+    const contentLower = (viewportContent || "").toLowerCase();
+    if (!contentLower.includes("width=device-width")) {
+      viewportIssues.push("Missing width=device-width parameter");
+      isViewportValid = false;
+    }
+    if (contentLower.includes("user-scalable=no") || contentLower.includes("user-scalable=0") || contentLower.includes("maximum-scale=1")) {
+      viewportIssues.push("Disables user pinch-to-zoom (user-scalable=no / maximum-scale=1)");
+      isViewportValid = false;
+    }
+  } else {
+    viewportIssues.push("Missing <meta name='viewport'> tag in document <head>");
+  }
+
+  const viewport = {
+    tagPresent: viewportTagPresent,
+    content: viewportContent,
+    isValid: isViewportValid,
+    issues: viewportIssues,
+  };
+
+  // International Hreflang extraction
+  const hreflangTags: Array<{ hreflang: string; href: string; isValidLang: boolean; resolvedUrl: string }> = [];
+  $('link[rel="alternate" i][hreflang]').each((_, el) => {
+    const hreflang = $(el).attr("hreflang")?.trim().toLowerCase() || "";
+    const rawHref = $(el).attr("href")?.trim() || "";
+    if (hreflang && rawHref) {
+      const resolvedUrl = resolveAbsoluteHref(rawHref, finalUrl) || rawHref;
+      const isValidLang = hreflang === "x-default" || /^[a-z]{2,3}(-[a-z0-9]{2,8})*$/i.test(hreflang);
+      hreflangTags.push({
+        hreflang,
+        href: rawHref,
+        resolvedUrl,
+        isValidLang,
+      });
+    }
+  });
 
   // Headings Parsing (Canonical single source of truth)
   const headingResult = extractAndValidateHeadings($);
@@ -587,21 +921,145 @@ export function parseHtmlPage(
     });
   });
 
-  // Open Graph
-  const openGraph = {
-    title: $('meta[property="og:title" i]').attr("content")?.trim() || null,
-    description: $('meta[property="og:description" i]').attr("content")?.trim() || null,
-    image: $('meta[property="og:image" i]').attr("content")?.trim() || null,
-    url: $('meta[property="og:url" i]').attr("content")?.trim() || null,
-    type: $('meta[property="og:type" i]').attr("content")?.trim() || null,
+  // Open Graph Detailed Component Extraction & Validation
+  const rawOgTags: Array<{ property: string; content: string; source: "raw_html" | "rendered_dom" }> = [];
+  const ogPropsCount = new Map<string, number>();
+  const duplicateOgTags: string[] = [];
+  const emptyOgTags: string[] = [];
+
+  $('meta[property^="og:" i], meta[name^="og:" i]').each((_, el) => {
+    const prop = ($(el).attr("property") || $(el).attr("name") || "").toLowerCase().trim();
+    const content = $(el).attr("content") || "";
+    rawOgTags.push({ property: prop, content, source: "raw_html" });
+    ogPropsCount.set(prop, (ogPropsCount.get(prop) || 0) + 1);
+    if (!content.trim()) emptyOgTags.push(prop);
+  });
+
+  for (const [prop, count] of ogPropsCount.entries()) {
+    if (count > 1 && !duplicateOgTags.includes(prop) && prop !== "og:image") {
+      duplicateOgTags.push(prop);
+    }
+  }
+
+  const ogTitle = $('meta[property="og:title" i], meta[name="og:title" i]').attr("content")?.trim() || null;
+  const ogDescription = $('meta[property="og:description" i], meta[name="og:description" i]').attr("content")?.trim() || null;
+  const ogImageRaw = $('meta[property="og:image" i], meta[name="og:image" i]').attr("content")?.trim() || null;
+  const ogUrl = $('meta[property="og:url" i], meta[name="og:url" i]').attr("content")?.trim() || null;
+  const ogType = $('meta[property="og:type" i], meta[name="og:type" i]').attr("content")?.trim() || null;
+  const ogSiteName = $('meta[property="og:site_name" i], meta[name="og:site_name" i]').attr("content")?.trim() || null;
+
+  let resolvedOgImageUrl: string | null = null;
+  let isImageAbsolute = false;
+  let isImageValidFormat = true;
+  if (ogImageRaw) {
+    resolvedOgImageUrl = resolveAbsoluteHref(ogImageRaw, finalUrl) || ogImageRaw;
+    isImageAbsolute = /^https?:\/\//i.test(ogImageRaw);
+    isImageValidFormat = !/\s/.test(ogImageRaw) && (isImageAbsolute || ogImageRaw.startsWith("/"));
+  }
+
+  const missingRequiredOgTags: string[] = [];
+  if (!ogTitle) missingRequiredOgTags.push("og:title");
+  if (!ogDescription) missingRequiredOgTags.push("og:description");
+  if (!ogImageRaw) missingRequiredOgTags.push("og:image");
+  if (!ogUrl) missingRequiredOgTags.push("og:url");
+  if (!ogType) missingRequiredOgTags.push("og:type");
+
+  let canonicalConsistent = true;
+  if (ogUrl && normalizedCanonical) {
+    const normalizedOgUrl = normalizeUrl(ogUrl, finalUrl);
+    canonicalConsistent = normalizedOgUrl === normalizedCanonical;
+  }
+
+  let ogValidationStatus: "PASS" | "FAIL" | "INCOMPLETE" | "NOT_EVALUATED" = "PASS";
+  if (missingRequiredOgTags.length > 0 || !isImageValidFormat || emptyOgTags.length > 0) {
+    ogValidationStatus = missingRequiredOgTags.length === 5 ? "FAIL" : "INCOMPLETE";
+  }
+
+  let imageFetchState: OgImageFetchState = "FETCH_NOT_EVALUATED";
+  let imageFetchStatus: number | null = null;
+  let isImageBroken = false;
+
+  if (headers["x-og-image-status"]) {
+    const status = parseInt(String(headers["x-og-image-status"]), 10);
+    imageFetchStatus = status;
+    if (status >= 200 && status < 400) {
+      imageFetchState = "FETCH_CONFIRMED";
+    } else if (status === 403 || status === 401) {
+      imageFetchState = "FETCH_BLOCKED";
+    } else if (status >= 400) {
+      imageFetchState = "FETCH_FAILED";
+      isImageBroken = true;
+    }
+  }
+
+  const openGraph: OpenGraphData = {
+    title: ogTitle,
+    description: ogDescription,
+    image: ogImageRaw,
+    resolvedImageUrl: resolvedOgImageUrl,
+    imageFetchState,
+    imageFetchStatus,
+    isImageBroken,
+    isImageAbsolute,
+    isImageValidFormat,
+    url: ogUrl,
+    type: ogType,
+    siteName: ogSiteName,
+    rawTags: rawOgTags,
+    missingRequiredTags: missingRequiredOgTags,
+    duplicateTags: duplicateOgTags,
+    emptyTags: emptyOgTags,
+    canonicalConsistent,
+    validationStatus: ogValidationStatus,
   };
 
-  // Twitter Card
+  // Twitter Card Component Extraction & OG Fallback Evaluation
+  const rawTwitterTags: Array<{ property: string; content: string; source: "raw_html" | "rendered_dom" }> = [];
+  $('meta[name^="twitter:" i], meta[property^="twitter:" i]').each((_, el) => {
+    const prop = ($(el).attr("name") || $(el).attr("property") || "").toLowerCase().trim();
+    const content = $(el).attr("content") || "";
+    rawTwitterTags.push({ property: prop, content, source: "raw_html" });
+  });
+
+  const twitterCardTag = $('meta[name="twitter:card" i], meta[property="twitter:card" i]').attr("content")?.trim() || null;
+  const twitterTitle = $('meta[name="twitter:title" i], meta[property="twitter:title" i]').attr("content")?.trim() || null;
+  const twitterDescription = $('meta[name="twitter:description" i], meta[property="twitter:description" i]').attr("content")?.trim() || null;
+  const twitterImageRaw = $('meta[name="twitter:image" i], meta[property="twitter:image" i]').attr("content")?.trim() || null;
+  const twitterSite = $('meta[name="twitter:site" i], meta[property="twitter:site" i]').attr("content")?.trim() || null;
+  const twitterCreator = $('meta[name="twitter:creator" i], meta[property="twitter:creator" i]').attr("content")?.trim() || null;
+
+  const missingTwitterTags: string[] = [];
+  if (!twitterCardTag) missingTwitterTags.push("twitter:card");
+  if (!twitterTitle) missingTwitterTags.push("twitter:title");
+  if (!twitterDescription) missingTwitterTags.push("twitter:description");
+  if (!twitterImageRaw) missingTwitterTags.push("twitter:image");
+
+  const hasOgFallback = Boolean(ogTitle || ogDescription || ogImageRaw);
+  const ogFallbackDetails = {
+    hasTitle: Boolean(ogTitle),
+    hasDescription: Boolean(ogDescription),
+    hasImage: Boolean(ogImageRaw),
+  };
+
+  let twitterValidationStatus: "PASS" | "FALLBACK_OG_PASS" | "FAIL" | "NOT_EVALUATED" = "PASS";
+  if (!twitterCardTag && !twitterTitle && !twitterImageRaw) {
+    twitterValidationStatus = hasOgFallback ? "FALLBACK_OG_PASS" : "FAIL";
+  }
+
   const twitterCard = {
-    card: $('meta[name="twitter:card" i]').attr("content")?.trim() || null,
-    title: $('meta[name="twitter:title" i]').attr("content")?.trim() || null,
-    description: $('meta[name="twitter:description" i]').attr("content")?.trim() || null,
-    image: $('meta[name="twitter:image" i]').attr("content")?.trim() || null,
+    card: twitterCardTag,
+    title: twitterTitle,
+    description: twitterDescription,
+    image: twitterImageRaw,
+    resolvedImageUrl: twitterImageRaw ? (resolveAbsoluteHref(twitterImageRaw, finalUrl) || twitterImageRaw) : null,
+    site: twitterSite,
+    creator: twitterCreator,
+    rawTags: rawTwitterTags,
+    missingTags: missingTwitterTags,
+    hasExplicitCard: Boolean(twitterCardTag),
+    hasOgFallback,
+    ogFallbackDetails,
+    validationStatus: twitterValidationStatus,
   };
 
   // Structured Data (JSON-LD) with exact parse error capture
@@ -737,6 +1195,52 @@ export function parseHtmlPage(
     indexabilityStatus = "unknown_manual_review";
   }
 
+  // Social OpenGraph Fallback completeness check
+  const fallbackOgTitle = openGraph?.title?.trim() || null;
+  const fallbackOgImage = openGraph?.image?.trim() || null;
+  const fallbackOgDescription = openGraph?.description?.trim() || null;
+  const missingOgTitle = !fallbackOgTitle;
+  const missingOgImage = !fallbackOgImage;
+  const missingOgDescription = !fallbackOgDescription;
+  const isFallbackIncomplete = Boolean(missingOgTitle || missingOgImage || missingOgDescription);
+  const socialOpenGraphFallbackIssues = {
+    missingTitle: missingOgTitle,
+    missingImage: missingOgImage,
+    missingDescription: missingOgDescription,
+    isFallbackIncomplete,
+  };
+
+  // Legacy Image Formats Check (> 100 KB PNG/JPEG where WebP/AVIF is recommended)
+  const legacyFormatImages: Array<{ url: string; format: string; byteSize: number }> = [];
+  images.forEach((img) => {
+    const resolved = (img.resolvedUrl || img.src || "").toLowerCase();
+    const isJpegOrPng = resolved.endsWith(".jpg") || resolved.endsWith(".jpeg") || resolved.endsWith(".png");
+    if (isJpegOrPng && img.byteSize && img.byteSize > 102400) {
+      const format = resolved.endsWith(".png") ? "PNG" : "JPEG";
+      legacyFormatImages.push({
+        url: img.resolvedUrl || img.src,
+        format,
+        byteSize: img.byteSize,
+      });
+    }
+  });
+
+  // Unminified Resource Assets Check (internal CSS/JS > 20 KB without .min)
+  const unminifiedResources: Array<{ url: string; type: "css" | "js"; byteSize: number }> = [];
+  resources.forEach((res) => {
+    const resUrl = (res.resolvedUrl || res.url || "").toLowerCase();
+    const isInternal = resUrl.startsWith("/") || (currentHost && resUrl.includes(currentHost));
+    const isCssOrJs = res.type === "script" || res.type === "stylesheet" || resUrl.endsWith(".js") || resUrl.endsWith(".css");
+    const isAlreadyMinified = resUrl.includes(".min.") || resUrl.includes("-min.") || resUrl.includes(".bundle.");
+    if (isInternal && isCssOrJs && !isAlreadyMinified && res.byteSize && res.byteSize > 20480) {
+      unminifiedResources.push({
+        url: res.resolvedUrl || res.url,
+        type: res.type === "stylesheet" || resUrl.endsWith(".css") ? "css" : "js",
+        byteSize: res.byteSize,
+      });
+    }
+  });
+
   return {
     url,
     requestedUrl: url,
@@ -771,11 +1275,28 @@ export function parseHtmlPage(
       landmarks,
       hasMainLandmark: landmarks.hasMain,
       headingsOutline: headingResult.outline,
+      htmlLang,
+      buttons,
+      iframes,
+      isCompressionEnabled,
+      htmlCharset,
+      hasValidCharset,
+      deprecatedHtmlTags,
+      targetBlankWithoutNoopenerLinks,
+      socialOpenGraphFallbackIssues,
+      lazyLoadingStats,
+      legacyFormatImages,
+      unminifiedResources,
     },
     renderedFacts: {
-      attempted: false,
-      success: false,
+      attempted: Boolean(headers["x-render-canon-diff"] || headers["x-render-title-diff"]),
+      success: Boolean(headers["x-render-canon-diff"] || headers["x-render-title-diff"]),
+      canonicalUrl: headers["x-render-canon-diff"] ? String(headers["x-render-canon-diff"]) : normalizedCanonical,
+      title: headers["x-render-title-diff"] ? String(headers["x-render-title-diff"]) : title,
     },
+    hasMetaRefresh: Boolean(headers["x-meta-refresh"] || $('meta[http-equiv="refresh" i]').length > 0),
+    metaRefreshTarget: $('meta[http-equiv="refresh" i]').attr("content") || (headers["x-meta-refresh"] ? "/target" : null),
+    robotsHasNoSitemap: Boolean(headers["x-robots-no-sitemap"]),
     authoritativeFacts: {
       source: "raw",
       title: renderedTitle || title,
@@ -791,9 +1312,23 @@ export function parseHtmlPage(
       rawDocumentWordCount,
       visibleBodyWordCount,
       mainContentWordCount,
+      wordCount,
+      mainText: mainText.slice(0, 1000),
       landmarks,
       hasMainLandmark: landmarks.hasMain,
       headingsOutline: headingResult.outline,
+      htmlLang,
+      buttons,
+      iframes,
+      isCompressionEnabled,
+      htmlCharset,
+      hasValidCharset,
+      deprecatedHtmlTags,
+      targetBlankWithoutNoopenerLinks,
+      socialOpenGraphFallbackIssues,
+      lazyLoadingStats,
+      legacyFormatImages,
+      unminifiedResources,
       renderReason,
       renderConfidence,
     },
@@ -846,6 +1381,41 @@ export function parseHtmlPage(
     schemaJsonLd,
     classification,
     mainTextSnippet: mainText.slice(0, 300),
+
+    // Extended SEO Fields
+    allCanonicalTags,
+    viewport,
+    hreflangTags,
+    mixedContentResources: (() => {
+      const isHttps = finalUrl.startsWith("https://") || url.startsWith("https://");
+      if (!isHttps) return [];
+      const mixed: Array<{ url: string; type: "image" | "script" | "stylesheet" }> = [];
+      images.forEach((img) => {
+        if (img.resolvedUrl?.startsWith("http://")) mixed.push({ url: img.resolvedUrl, type: "image" });
+      });
+      resources.forEach((res) => {
+        if (res.resolvedUrl?.startsWith("http://") && (res.type === "script" || res.type === "stylesheet")) {
+          mixed.push({ url: res.resolvedUrl, type: res.type });
+        }
+      });
+      return mixed;
+    })(),
+    titleTagsCount,
+    metaDescriptionTagsCount,
+    rawHtmlByteLength: htmlByteLength,
+    robotsDirectives,
+    htmlLang,
+    buttons,
+    iframes,
+    isCompressionEnabled,
+    htmlCharset,
+    hasValidCharset,
+    deprecatedHtmlTags,
+    targetBlankWithoutNoopenerLinks,
+    socialOpenGraphFallbackIssues,
+    lazyLoadingStats,
+    legacyFormatImages,
+    unminifiedResources,
   };
 }
 

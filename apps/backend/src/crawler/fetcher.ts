@@ -12,7 +12,7 @@ import type {
 } from "./types";
 
 const DEFAULT_USER_AGENT =
-  "Mozilla/5.0 (compatible; DreamSEOBot/1.0; +https://dreamseo.dev/bot)";
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
 const MAX_BODY_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB max per HTML response
 
 export interface FetchResult {
@@ -35,67 +35,101 @@ export async function fetchPageHtml(
   targetUrl: string,
   timeoutMs = 12000,
   signal?: AbortSignal,
+  retries = 2,
 ): Promise<FetchResult> {
   const startedAt = Date.now();
-  const redirectHops: RedirectHop[] = [];
+  let lastError: any = null;
 
-  try {
-    const response: AxiosResponse = await axios.get(targetUrl, {
-      headers: {
-        "User-Agent": DEFAULT_USER_AGENT,
-        Accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-      },
-      timeout: timeoutMs,
-      maxRedirects: 10,
-      maxContentLength: MAX_BODY_SIZE_BYTES,
-      responseType: "text",
-      signal,
-      validateStatus: () => true, // Don't throw on 4xx/5xx to capture status
-      beforeRedirect: (_options, responseDetails) => {
-        if (responseDetails?.statusCode) {
-          redirectHops.push({
-            statusCode: responseDetails.statusCode,
-            fromUrl: (responseDetails as any).headers?.location || targetUrl,
-            toUrl: (responseDetails as any).url || targetUrl,
-          });
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const redirectHops: RedirectHop[] = [];
+    try {
+      const response: AxiosResponse = await axios.get(targetUrl, {
+        headers: {
+          "User-Agent": DEFAULT_USER_AGENT,
+          Accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+          "Accept-Encoding": "gzip, deflate, br",
+        },
+        timeout: timeoutMs,
+        maxRedirects: 10,
+        maxContentLength: MAX_BODY_SIZE_BYTES,
+        responseType: "text",
+        signal,
+        validateStatus: () => true, // Don't throw on 4xx/5xx to capture status
+        beforeRedirect: (_options, responseDetails) => {
+          if (responseDetails?.statusCode) {
+            redirectHops.push({
+              statusCode: responseDetails.statusCode,
+              fromUrl: (responseDetails as any).headers?.location || targetUrl,
+              toUrl: (responseDetails as any).url || targetUrl,
+            });
+          }
+        },
+      });
+
+      const responseTimeMs = Date.now() - startedAt;
+      const finalUrl = (response.request as any)?.res?.responseUrl || targetUrl;
+      const contentType = String(response.headers["content-type"] || "");
+      const rawHtml = typeof response.data === "string" ? response.data : "";
+
+      const capturedHeaders: Record<string, string | string[] | undefined> = {};
+      if (response.headers && typeof response.headers === "object") {
+        for (const [k, v] of Object.entries(response.headers)) {
+          if (v !== undefined && v !== null) {
+            capturedHeaders[k.toLowerCase()] = Array.isArray(v)
+              ? v.map((item) => String(item))
+              : String(v);
+          }
         }
-      },
-    });
+      }
 
-    const responseTimeMs = Date.now() - startedAt;
-    const finalUrl = (response.request as any)?.res?.responseUrl || targetUrl;
-    const contentType = String(response.headers["content-type"] || "");
-    const rawHtml = typeof response.data === "string" ? response.data : "";
+      // In Node.js, Axios auto-decompresses gzip/br/deflate streams and strips Content-Encoding from response.headers.
+      // Recover the wire Content-Encoding from underlying HTTP rawHeaders if not present on response.headers.
+      if (!capturedHeaders["content-encoding"]) {
+        const rawHeaders = (response.request as any)?.res?.rawHeaders || [];
+        for (let i = 0; i < rawHeaders.length; i += 2) {
+          if (String(rawHeaders[i]).toLowerCase() === "content-encoding") {
+            capturedHeaders["content-encoding"] = String(rawHeaders[i + 1]);
+            break;
+          }
+        }
+      }
 
-    return {
-      ok: response.status >= 200 && response.status < 400,
-      statusCode: response.status,
-      finalUrl,
-      redirectHops,
-      html: rawHtml,
-      headers: response.headers as Record<string, string | string[] | undefined>,
-      contentType,
-      responseTimeMs,
-      byteSize: Buffer.byteLength(rawHtml, "utf8"),
-    };
-  } catch (error: any) {
-    const responseTimeMs = Date.now() - startedAt;
-    return {
-      ok: false,
-      statusCode: error.response?.status || 0,
-      finalUrl: targetUrl,
-      redirectHops,
-      html: "",
-      headers: error.response?.headers || {},
-      contentType: "",
-      responseTimeMs,
-      byteSize: 0,
-      errorMessage: error.message,
-    };
+      return {
+        ok: response.status >= 200 && response.status < 400,
+        statusCode: response.status,
+        finalUrl,
+        redirectHops,
+        html: rawHtml,
+        headers: capturedHeaders,
+        contentType,
+        responseTimeMs,
+        byteSize: Buffer.byteLength(rawHtml, "utf8"),
+      };
+    } catch (error: any) {
+      lastError = error;
+      if (attempt < retries && !signal?.aborted) {
+        // Transient network failure retry with small backoff
+        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+        continue;
+      }
+    }
   }
+
+  const responseTimeMs = Date.now() - startedAt;
+  return {
+    ok: false,
+    statusCode: lastError?.response?.status || 0,
+    finalUrl: targetUrl,
+    redirectHops: [],
+    html: "",
+    headers: {},
+    contentType: "",
+    responseTimeMs,
+    byteSize: 0,
+    errorMessage: lastError?.message || "Failed to fetch page",
+  };
 }
 
 /**
@@ -334,7 +368,66 @@ export function classifyBrowserPageState(
 }
 
 /**
- * Runs Playwright verification using the shared browser pool.
+ * Helper to run a single browser probe with bounded DOM stabilization.
+ */
+async function runSingleBrowserProbe(
+  browser: any,
+  targetUrl: string,
+  timeoutMs: number,
+  stabilizationWaitMs = 1500
+): Promise<{
+  navStatus: number;
+  finalUrl: string;
+  pageTitle: string;
+  bodyText: string;
+  headings: string[];
+  pageState: BrowserPageState;
+  isChallenge: boolean;
+  timestamp: string;
+}> {
+  const context = await browser.newContext({
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+  });
+  const timestamp = new Date().toISOString();
+  try {
+    const page = await context.newPage();
+    const response = await page.goto(targetUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: timeoutMs,
+    });
+    // Bounded stabilization: wait for networkidle or timeout
+    await page.waitForLoadState("networkidle", { timeout: Math.min(2500, stabilizationWaitMs) }).catch(() => {});
+    await page.waitForTimeout(500);
+
+    const navStatus = response ? response.status() : 200;
+    const finalUrl = page.url();
+    const pageTitle = await page.title().catch(() => "");
+    const bodyText = await page.evaluate(() => document.body?.innerText?.slice(0, 1000) || "").catch(() => "");
+    const headings = await page
+      .evaluate(() => Array.from(document.querySelectorAll("h1, h2")).map((el) => (el.textContent || "").trim()))
+      .catch(() => []);
+
+    const { pageState, isChallenge } = classifyBrowserPageState(navStatus, pageTitle, bodyText, headings);
+    await context.close();
+    return {
+      navStatus,
+      finalUrl,
+      pageTitle,
+      bodyText,
+      headings,
+      pageState,
+      isChallenge,
+      timestamp,
+    };
+  } catch (err) {
+    await context.close().catch(() => {});
+    throw err;
+  }
+}
+
+/**
+ * Runs Playwright verification with multi-observation confirmation for disputed 404/410 targets.
  */
 export async function verifyLinkWithBrowser(
   targetUrl: string,
@@ -351,59 +444,76 @@ export async function verifyLinkWithBrowser(
     };
   }
 
-  let context = null;
   try {
-    context = await browser.newContext({
-      userAgent:
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    });
-    const page = await context.newPage();
-    const response = await page.goto(targetUrl, {
-      waitUntil: "domcontentloaded",
-      timeout: timeoutMs,
-    });
-    // Settle delay for client scripts / SPA render
-    await page.waitForTimeout(1000);
+    // Probe 1: Normal settle
+    const probe1 = await runSingleBrowserProbe(browser, targetUrl, timeoutMs, 1500);
 
-    const navStatus = response ? response.status() : 200;
-    const finalUrl = page.url();
-    const pageTitle = await page.title().catch(() => "");
-    const bodyText = await page.evaluate(() => document.body?.innerText?.slice(0, 1000) || "").catch(() => "");
-    const headings = await page
-      .evaluate(() => Array.from(document.querySelectorAll("h1, h2")).map((el) => (el.textContent || "").trim()))
-      .catch(() => []);
+    // If Probe 1 indicates not_found_page or 404/410, run Probe 2 in fresh context with extended stabilization
+    if (probe1.pageState === "not_found_page" || probe1.navStatus === 404 || probe1.navStatus === 410) {
+      try {
+        const probe2 = await runSingleBrowserProbe(browser, targetUrl, timeoutMs + 2000, 3000);
 
-    const { pageState, isChallenge } = classifyBrowserPageState(navStatus, pageTitle, bodyText, headings);
+        // If probe 1 and probe 2 conflict (e.g. one valid and one not-found), classify as inconclusive with zero penalty
+        if (probe1.pageState !== probe2.pageState) {
+          if (probe1.pageState === "valid_page" || probe2.pageState === "valid_page") {
+            return {
+              attempted: true,
+              navigationStatus: probe2.navStatus || probe1.navStatus,
+              finalUrl: probe2.finalUrl || probe1.finalUrl,
+              pageTitle: probe2.pageTitle || probe1.pageTitle,
+              pageState: "valid_page",
+              visibleTextSample: (probe2.bodyText || probe1.bodyText).slice(0, 150),
+              challengeDetected: probe1.isChallenge || probe2.isChallenge,
+              checkedAt: new Date().toISOString(),
+              outcome: "http_404_browser_inconclusive",
+            };
+          }
+        }
+
+        // Both probes agree on not_found_page
+        if (probe2.pageState === "not_found_page") {
+          return {
+            attempted: true,
+            navigationStatus: probe2.navStatus,
+            finalUrl: probe2.finalUrl,
+            pageTitle: probe2.pageTitle,
+            pageState: "not_found_page",
+            visibleTextSample: probe2.bodyText.slice(0, 150),
+            challengeDetected: probe2.isChallenge,
+            checkedAt: new Date().toISOString(),
+            outcome: "confirmed_broken",
+          };
+        }
+      } catch {
+        // Fall back to probe 1 if probe 2 times out
+      }
+    }
 
     let outcome: ExternalLinkOutcome = "browser_verified_ok";
-    if (pageState === "challenge_page") {
+    if (probe1.pageState === "challenge_page") {
       outcome = "browser_challenge_inconclusive";
-    } else if (pageState === "login_wall") {
+    } else if (probe1.pageState === "login_wall") {
       outcome = "bot_blocked_inconclusive";
-    } else if (pageState === "not_found_page") {
+    } else if (probe1.pageState === "not_found_page") {
       outcome = "confirmed_broken";
-    } else if (pageState === "valid_page") {
+    } else if (probe1.pageState === "valid_page") {
       outcome = "browser_verified_ok";
     } else {
       outcome = "http_404_browser_inconclusive";
     }
 
-    await context.close();
     return {
       attempted: true,
-      navigationStatus: navStatus,
-      finalUrl,
-      pageTitle,
-      pageState,
-      visibleTextSample: bodyText.slice(0, 150),
-      challengeDetected: isChallenge,
+      navigationStatus: probe1.navStatus,
+      finalUrl: probe1.finalUrl,
+      pageTitle: probe1.pageTitle,
+      pageState: probe1.pageState,
+      visibleTextSample: probe1.bodyText.slice(0, 150),
+      challengeDetected: probe1.isChallenge,
       checkedAt: new Date().toISOString(),
       outcome,
     };
   } catch (err: any) {
-    if (context) {
-      await context.close().catch(() => {});
-    }
     return {
       attempted: true,
       navigationStatus: null,

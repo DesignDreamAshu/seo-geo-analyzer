@@ -104,6 +104,11 @@ export interface SingleParityPopulation {
   notEvaluated: number;
   strictParity: number; // 0 - 100
   comparableParity: number; // 0 - 100
+  diagnosticCriticalParityPercent?: number;
+  diagnosticCriticalStrictPercent?: number;
+  diagnosticCriticalTotalFacts?: number;
+  diagnosticCriticalMatches?: number;
+  observationalParityPercent?: number;
   accuracyBand: "excellent" | "good" | "needs_review" | "unacceptable";
   categoryParity: {
     coreSeo: ParityCategorySummary;
@@ -126,6 +131,24 @@ export interface SingleParityPopulation {
       mismatchReason?: string;
     }>;
   }>;
+}
+
+export interface MainContentComparabilityItem {
+  url: string;
+  pageClass: string;
+  rawSelectorUsed: string;
+  browserSelectorUsed: string;
+  rawMainWords: number;
+  authoritativeMainWords: number;
+  browserMainWords: number;
+  renderEligible: boolean;
+  renderAttempted: boolean;
+  renderSuccess: boolean;
+  thinContentCrawler: boolean;
+  thinContentBrowser: boolean;
+  mainContentEvaluation: "comparable" | "not_comparable" | "heuristic" | "render_required";
+  nonComparableReason?: string;
+  isNumericMatch: boolean;
 }
 
 export interface RenderDecisionSample {
@@ -177,6 +200,11 @@ export interface ParityArtifact {
   generatedAt: string;
   rawExtractionParity: SingleParityPopulation;
   productionAuthoritativeParity: SingleParityPopulation;
+  diagnosticCriticalFactParityPercent?: number;
+  mainContentNumericParity?: number;
+  thinContentDecisionParityPercent?: number;
+  mainContentComparabilityBreakdown?: MainContentComparabilityItem[];
+  factCertificationPolicy?: Record<string, any>;
   renderTriggerAccuracy: RenderTriggerAccuracyMetric;
   renderDecisionSamples: RenderDecisionSample[];
   ruleMetrics: RuleAccuracyMetric[];

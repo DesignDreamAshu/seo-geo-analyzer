@@ -1,4 +1,4 @@
-import { parseHtmlPage } from "./parser";
+import { parseHtmlPage, validateHeadingOutlineHierarchy } from "./parser";
 import { sharedBrowserPool } from "./fetcher";
 import type {
   AuthoritativePageFacts,
@@ -71,6 +71,12 @@ export function evaluateRenderEligibility(
   const lowerHtml = (page.html || "").toLowerCase();
   if ((lowerHtml.includes("w-dyn-list") || lowerHtml.includes("__next_data__") || lowerHtml.includes("jobposting")) && rawMainWords < 120) {
     reasons.push("dynamic_cms_shell");
+  }
+
+  // 5. Bot Challenge / WAF Interception detection
+  const titleLower = (page.title || "").toLowerCase().trim();
+  if (titleLower === "access denied" || titleLower.includes("cloudflare") || titleLower.includes("just a moment")) {
+    reasons.push("bot_challenge_interception");
   }
 
   const eligible = reasons.length > 0;
@@ -365,6 +371,11 @@ export async function processPageAuthoritatively(
         pageData.mainContentWordCount = authoritativeFacts.mainContentWordCount;
         pageData.wordCount = authoritativeFacts.mainContentWordCount > 0 ? authoritativeFacts.mainContentWordCount : authoritativeFacts.visibleBodyWordCount;
         pageData.headingsOutline = authoritativeFacts.headingsOutline;
+
+        // Re-validate heading hierarchy against authoritative rendered outline
+        const renderedHeadingValidation = validateHeadingOutlineHierarchy(authoritativeFacts.headingsOutline);
+        pageData.headingsHierarchyValid = renderedHeadingValidation.valid;
+        pageData.headingsHierarchyIssues = renderedHeadingValidation.issues;
       }
     } catch {
       renderDecision.success = false;
@@ -420,6 +431,18 @@ export async function processPageAuthoritatively(
       renderReason: "static_complete",
       renderConfidence: "high",
     };
+    pageData.renderReason = "static_complete";
+    pageData.renderConfidence = "high";
+  }
+
+  // 4. Bot Challenge / WAF Interception Isolation
+  const finalTitleLower = (pageData.title || "").toLowerCase().trim();
+  if (finalTitleLower === "access denied" || finalTitleLower.includes("attention required! | cloudflare") || finalTitleLower.includes("just a moment")) {
+    pageData.resourceType = "error";
+    pageData.indexabilityStatus = "unknown_manual_review";
+    pageData.isIndexable = false;
+    pageData.renderReason = "bot_challenge_interception";
+    pageData.renderConfidence = "manual_review";
   }
 
   return pageData;

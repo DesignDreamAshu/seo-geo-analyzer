@@ -182,6 +182,7 @@ async function runLiveAudit() {
     runId,
     gitSha,
     auditId: result.auditId,
+    scoreModelVersion: result.scoreModelVersion,
     startedAt: result.startedAt,
     completedAt: result.completedAt,
     durationMs: result.durationMs,
@@ -191,6 +192,7 @@ async function runLiveAudit() {
     inventory: result.inventory,
     severityCounts: result.severityCounts,
     issues: result.issues,
+    ruleExecutionObservability: result.ruleExecutionObservability,
     linkGraphSummary: result.linkGraphSummary,
   };
   fs.writeFileSync(artifactPath, JSON.stringify(auditArtifact, null, 2), "utf8");

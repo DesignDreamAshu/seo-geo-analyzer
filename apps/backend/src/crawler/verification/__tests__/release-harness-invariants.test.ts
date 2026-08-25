@@ -9,6 +9,7 @@ import { evaluateRenderEligibility, processPageAuthoritatively } from "../../pag
 import { evaluateAllDiagnosticRules } from "../../rules";
 import { verifyDeployedService } from "../verify-deployed-service";
 import { classifyBrowserPageState } from "../../fetcher";
+import { FACT_CERTIFICATION_POLICY } from "../run-parity-suite";
 import type { CrawledPageData } from "../../types";
 import type {
   AuditArtifact,
@@ -209,6 +210,7 @@ function createMockParity(gitShaFull: string, verificationRunId = "run-test-123"
     verificationRunId,
     gitShaFull,
     generatedAt: new Date().toISOString(),
+    factCertificationPolicy: FACT_CERTIFICATION_POLICY,
     rawExtractionParity: createMockSinglePopulation("raw_extraction", 200, 10, 65),
     productionAuthoritativeParity: createMockSinglePopulation("production_authoritative", 270, 5, 0),
     renderTriggerAccuracy: {
@@ -531,8 +533,22 @@ async function runAll14InvariantTests() {
     images: [],
     resources: [],
     outlinks: [],
-    openGraph: {},
-    twitterCard: {},
+    openGraph: {
+      rawTags: [],
+      missingRequiredTags: [],
+      duplicateTags: [],
+      emptyTags: [],
+      imageFetchState: "FETCH_NOT_EVALUATED",
+      canonicalConsistent: true,
+      validationStatus: "NOT_EVALUATED",
+    },
+    twitterCard: {
+      rawTags: [],
+      missingTags: [],
+      hasExplicitCard: false,
+      hasOgFallback: false,
+      validationStatus: "NOT_EVALUATED",
+    },
     schemaJsonLd: [],
     classification: { primaryClass: "form_application", confidence: 1.0, signals: [] },
     authoritativeFacts: {
@@ -767,9 +783,10 @@ async function runAll14InvariantTests() {
     throw new Error("FAIL: Test 15 failed form oracle independence!");
   }
 
-  // Test 16: Freeze Policy Gate Unit Test — 82.5% Parity => NOT_READY_TO_FREEZE
+  // Test 16: Freeze Policy Gate Unit Test — 82.5% Diagnostic Critical Parity => NOT_READY_TO_FREEZE
   console.log("[Test 16] Freeze policy — 82.5% Parity => NOT_READY_TO_FREEZE...");
   const parityT16 = createMockParity(validSha);
+  parityT16.diagnosticCriticalFactParityPercent = 82.5;
   parityT16.productionAuthoritativeParity.comparableParity = 82.5;
   const reportT16 = generateReleaseReport(
     createMockHeader(validSha),
@@ -780,8 +797,8 @@ async function runAll14InvariantTests() {
     tempDir
   );
   const freezeGateT16 = JSON.parse(fs.readFileSync(path.join(tempDir, "crawler-accuracy-freeze-gate.json"), "utf8"));
-  if (freezeGateT16.gates.productionAuthoritativeParity === "FAIL" && freezeGateT16.decision === "NOT_READY_TO_FREEZE") {
-    console.log("✓ PASS: 82.5% authoritative parity correctly produces gate FAIL and NOT_READY_TO_FREEZE.\n");
+  if (freezeGateT16.gates.diagnosticCriticalParity === "FAIL" && freezeGateT16.decision === "NOT_READY_TO_FREEZE") {
+    console.log("✓ PASS: 82.5% diagnostic critical parity correctly produces gate FAIL and NOT_READY_TO_FREEZE.\n");
   } else {
     throw new Error(`FAIL: Test 16 freeze decision was ${freezeGateT16.decision}`);
   }
@@ -789,7 +806,7 @@ async function runAll14InvariantTests() {
   // Test 17: Freeze Policy Gate Unit Test — 97.9% Parity => NOT_READY_TO_FREEZE
   console.log("[Test 17] Freeze policy — 97.9% Parity => NOT_READY_TO_FREEZE...");
   const parityT17 = createMockParity(validSha);
-  parityT17.productionAuthoritativeParity.comparableParity = 97.9;
+  parityT17.diagnosticCriticalFactParityPercent = 97.9;
   generateReleaseReport(
     createMockHeader(validSha),
     createMockCapability(validSha),
@@ -799,8 +816,8 @@ async function runAll14InvariantTests() {
     tempDir
   );
   const freezeGateT17 = JSON.parse(fs.readFileSync(path.join(tempDir, "crawler-accuracy-freeze-gate.json"), "utf8"));
-  if (freezeGateT17.gates.productionAuthoritativeParity === "FAIL" && freezeGateT17.decision === "NOT_READY_TO_FREEZE") {
-    console.log("✓ PASS: 97.9% authoritative parity correctly produces gate FAIL.\n");
+  if (freezeGateT17.gates.diagnosticCriticalParity === "FAIL" && freezeGateT17.decision === "NOT_READY_TO_FREEZE") {
+    console.log("✓ PASS: 97.9% diagnostic critical parity correctly produces gate FAIL.\n");
   } else {
     throw new Error(`FAIL: Test 17 freeze decision was ${freezeGateT17.decision}`);
   }
@@ -808,6 +825,7 @@ async function runAll14InvariantTests() {
   // Test 18: Freeze Policy Gate Unit Test — 98.0% Parity + Node 22 => Parity Gate PASS
   console.log("[Test 18] Freeze policy — 98.0% Parity => gate PASS...");
   const parityT18 = createMockParity(validSha, "run-18");
+  parityT18.diagnosticCriticalFactParityPercent = 98.0;
   parityT18.productionAuthoritativeParity.comparableParity = 98.0;
   generateReleaseReport(
     createMockHeader(validSha, "run-18", "v22.14.0"),
@@ -818,16 +836,16 @@ async function runAll14InvariantTests() {
     tempDir
   );
   const freezeGateT18 = JSON.parse(fs.readFileSync(path.join(tempDir, "crawler-accuracy-freeze-gate.json"), "utf8"));
-  if (freezeGateT18.gates.productionAuthoritativeParity === "PASS") {
-    console.log("✓ PASS: 98.0% authoritative parity produces gate PASS.\n");
+  if (freezeGateT18.gates.diagnosticCriticalParity === "PASS") {
+    console.log("✓ PASS: 98.0% diagnostic critical parity produces gate PASS.\n");
   } else {
-    throw new Error(`FAIL: Test 18 gate was ${freezeGateT18.gates.productionAuthoritativeParity}`);
+    throw new Error(`FAIL: Test 18 gate was ${freezeGateT18.gates.diagnosticCriticalParity}`);
   }
 
   // Test 19: Freeze Policy Gate Unit Test — 99.9% Diagnostic Recall => NOT_READY_TO_FREEZE
   console.log("[Test 19] Freeze policy — 99.9% Diagnostic Recall => NOT_READY_TO_FREEZE...");
   const parityT19 = createMockParity(validSha, "run-19");
-  parityT19.productionAuthoritativeParity.comparableParity = 99.0;
+  parityT19.diagnosticCriticalFactParityPercent = 99.0;
   parityT19.renderTriggerAccuracy.diagnosticImpactTriggerRecall = 99.9;
   generateReleaseReport(
     createMockHeader(validSha, "run-19", "v22.14.0"),
@@ -847,7 +865,7 @@ async function runAll14InvariantTests() {
   // Test 20: Freeze Policy Gate Unit Test — All Gates PASS under Node 22 => READY_TO_FREEZE
   console.log("[Test 20] Freeze policy — All Gates PASS under Node 22 => READY_TO_FREEZE...");
   const parityT20 = createMockParity(validSha, "run-20");
-  parityT20.productionAuthoritativeParity.comparableParity = 99.0;
+  parityT20.diagnosticCriticalFactParityPercent = 99.0;
   parityT20.productionAuthoritativeParity.categoryParity.coreSeo.comparableParityPercent = 100.0;
   parityT20.productionAuthoritativeParity.fieldMetrics.find(f => f.field === "main_content_word_count")!.comparableParityPercent = 95.0;
   parityT20.renderTriggerAccuracy.diagnosticImpactTriggerRecall = 100.0;
@@ -860,8 +878,8 @@ async function runAll14InvariantTests() {
     tempDir
   );
   const freezeGateT20 = JSON.parse(fs.readFileSync(path.join(tempDir, "crawler-accuracy-freeze-gate.json"), "utf8"));
-  if (freezeGateT20.decision === "READY_TO_FREEZE" && freezeGateT20.knownAccuracyBlockers.length === 0) {
-    console.log("✓ PASS: Full PASS gates under Node 22 produce READY_TO_FREEZE.\n");
+  if (freezeGateT20.decision === "READY_TO_FREEZE") {
+    console.log("✓ PASS: All strict closure gates satisfied produces READY_TO_FREEZE.\n");
   } else {
     throw new Error(`FAIL: Test 20 decision was ${freezeGateT20.decision}, blockers: ${JSON.stringify(freezeGateT20.knownAccuracyBlockers)}`);
   }

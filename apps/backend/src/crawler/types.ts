@@ -10,6 +10,7 @@ export type ResourceType =
   | "stylesheet"
   | "api_endpoint"
   | "utility_endpoint"
+  | "error"
   | "other";
 
 export type IndexabilityStatus =
@@ -171,6 +172,14 @@ export type BrowserPageState =
 export type BrowserVerificationCapability = "available" | "unavailable" | "degraded";
 
 export type CrawlTerminationReason =
+  | "CRAWL_COMPLETE"
+  | "MAX_PAGES_REACHED"
+  | "DEPTH_LIMIT_REACHED"
+  | "QUEUE_EXHAUSTED"
+  | "TIME_LIMIT_REACHED"
+  | "MANUAL_CANCEL"
+  | "FETCH_FAILURE_THRESHOLD"
+  | "INTERNAL_ERROR"
   | "queue_exhausted"
   | "max_pages_reached"
   | "cancelled"
@@ -292,6 +301,62 @@ export interface HeadingOutlineItem {
   context: "main" | "nav" | "footer" | "header" | "aside" | "component";
 }
 
+export interface OpenGraphTagFact {
+  property: string;
+  content: string;
+  source: "raw_html" | "rendered_dom";
+}
+
+export type OgImageFetchState =
+  | "FETCH_CONFIRMED"
+  | "FETCH_FAILED"
+  | "FETCH_BLOCKED"
+  | "FETCH_NOT_EVALUATED"
+  | "FETCH_INCONCLUSIVE";
+
+export interface OpenGraphData {
+  title?: string | null;
+  description?: string | null;
+  image?: string | null;
+  resolvedImageUrl?: string | null;
+  imageFetchState: OgImageFetchState;
+  imageFetchStatus?: number | null;
+  imageContentType?: string | null;
+  imageDimensions?: { width: number; height: number } | null;
+  isImageBroken?: boolean;
+  isImageAbsolute?: boolean;
+  isImageValidFormat?: boolean;
+  url?: string | null;
+  type?: string | null;
+  siteName?: string | null;
+  rawTags: OpenGraphTagFact[];
+  missingRequiredTags: string[];
+  duplicateTags: string[];
+  emptyTags: string[];
+  canonicalConsistent: boolean;
+  validationStatus: "PASS" | "FAIL" | "INCOMPLETE" | "NOT_EVALUATED";
+}
+
+export interface TwitterCardData {
+  card?: string | null;
+  title?: string | null;
+  description?: string | null;
+  image?: string | null;
+  resolvedImageUrl?: string | null;
+  site?: string | null;
+  creator?: string | null;
+  rawTags: OpenGraphTagFact[];
+  missingTags: string[];
+  hasExplicitCard: boolean;
+  hasOgFallback: boolean;
+  ogFallbackDetails?: {
+    hasTitle: boolean;
+    hasDescription: boolean;
+    hasImage: boolean;
+  };
+  validationStatus: "PASS" | "FALLBACK_OG_PASS" | "FAIL" | "NOT_EVALUATED";
+}
+
 export interface JsonLdBlock {
   blockIndex: number;
   raw: string;
@@ -305,11 +370,31 @@ export interface JsonLdBlock {
   errors: string[];
 }
 
+export interface StructuredOccurrence {
+  occurrenceId: string;
+  type: string; // e.g. "FORM_CONTROL", "IMAGE_ALT", "IMAGE_DIMENSIONS", "BROKEN_LINK", "LINK_TARGET_BLANK", "HEADING_HIERARCHY", "SCHEMA_ERROR", "DEPRECATED_TAG", etc.
+  identity: string; // concise primary human-readable identity (e.g. `<input name="candidateEmail" type="email">`, `https://example.com/broken`, `<h1>...</h1>`)
+  label?: string; // descriptive label (e.g. "Candidate Email Input", "Footer Logo Image", "H2 Subtitle")
+  pageUrl: string;
+  targetUrl?: string | null;
+  selector?: string | null;
+  tagName?: string | null;
+  attributes?: Record<string, string | null | undefined>;
+  snippet?: string | null;
+  observedValue?: string | null;
+  expectedValue?: string | null;
+  metadata?: Record<string, any>;
+}
+
 export interface FormControlFact {
   tag: string;
   type?: string;
   name?: string;
   id?: string;
+  placeholder?: string;
+  ariaLabel?: string | null;
+  ariaLabelledBy?: string | null;
+  snippet?: string;
   accessibleName: string | null;
   isLabelled: boolean;
 }
@@ -322,6 +407,39 @@ export interface FormFact {
   unlabelledCount: number;
   controls: FormControlFact[];
   formClassification?: "global_template_form" | "page_primary_form" | "unknown_form";
+}
+
+export interface ButtonFact {
+  tag: string;
+  text: string;
+  ariaLabel: string | null;
+  ariaLabelledBy: string | null;
+  accessibleName: string;
+  isLabelled: boolean;
+  domSelector?: string;
+}
+
+export interface IframeFact {
+  src: string | null;
+  title: string | null;
+  name?: string | null;
+  isHidden: boolean;
+  domSelector?: string;
+}
+
+export interface RuleExecutionRecord {
+  ruleId: string;
+  category: string;
+  title: string;
+  severity: "critical" | "warning" | "opportunity" | "notice";
+  isScoring: boolean;
+  eligibleCount: number;
+  evaluatedCount: number;
+  passedCount: number;
+  failedCount: number;
+  skippedCount: number;
+  skipReasons: Record<string, number>;
+  status: "PASSED" | "FAILED" | "SKIPPED" | "NOT_APPLICABLE";
 }
 
 export interface LandmarkFacts {
@@ -360,6 +478,18 @@ export interface RawPageFacts {
   landmarks: LandmarkFacts;
   hasMainLandmark: boolean;
   headingsOutline: HeadingOutlineItem[];
+  htmlLang?: string | null;
+  buttons?: ButtonFact[];
+  iframes?: IframeFact[];
+  isCompressionEnabled?: boolean;
+  htmlCharset?: string | null;
+  hasValidCharset?: boolean;
+  deprecatedHtmlTags?: string[];
+  targetBlankWithoutNoopenerLinks?: Array<{ href: string; text: string; rel: string | null }>;
+  socialOpenGraphFallbackIssues?: { missingTitle: boolean; missingImage: boolean; missingDescription: boolean; isFallbackIncomplete: boolean };
+  lazyLoadingStats?: { belowFoldMissingLazyCount: number; sampleImageUrls: string[] };
+  legacyFormatImages?: Array<{ url: string; format: string; byteSize: number }>;
+  unminifiedResources?: Array<{ url: string; type: "css" | "js"; byteSize: number }>;
 }
 
 export interface RenderedPageFacts {
@@ -384,10 +514,23 @@ export interface RenderedPageFacts {
   landmarks?: LandmarkFacts;
   hasMainLandmark?: boolean;
   headingsOutline?: HeadingOutlineItem[];
+  htmlLang?: string | null;
+  buttons?: ButtonFact[];
+  iframes?: IframeFact[];
+  isCompressionEnabled?: boolean;
+  htmlCharset?: string | null;
+  hasValidCharset?: boolean;
+  deprecatedHtmlTags?: string[];
+  targetBlankWithoutNoopenerLinks?: Array<{ href: string; text: string; rel: string | null }>;
+  socialOpenGraphFallbackIssues?: { missingTitle: boolean; missingImage: boolean; missingDescription: boolean; isFallbackIncomplete: boolean };
+  lazyLoadingStats?: { belowFoldMissingLazyCount: number; sampleImageUrls: string[] };
+  legacyFormatImages?: Array<{ url: string; format: string; byteSize: number }>;
+  unminifiedResources?: Array<{ url: string; type: "css" | "js"; byteSize: number }>;
 }
 
 export interface AuthoritativePageFacts {
   source: "raw" | "rendered";
+  sourceMode?: "raw_http" | "rendered_playwright";
   title: string | null;
   metaDescription: string | null;
   canonicalUrl: string | null;
@@ -398,14 +541,107 @@ export interface AuthoritativePageFacts {
   unlabelledFormControlCount: number;
   missingAltCount: number;
   images: ImageAsset[];
+  wordCount?: number;
+  mainText?: string;
   rawDocumentWordCount: number;
   visibleBodyWordCount: number;
   mainContentWordCount: number;
   landmarks: LandmarkFacts;
   hasMainLandmark: boolean;
   headingsOutline: HeadingOutlineItem[];
+  htmlLang?: string | null;
+  buttons?: ButtonFact[];
+  iframes?: IframeFact[];
+  isCompressionEnabled?: boolean;
+  htmlCharset?: string | null;
+  hasValidCharset?: boolean;
+  deprecatedHtmlTags?: string[];
+  targetBlankWithoutNoopenerLinks?: Array<{ href: string; text: string; rel: string | null }>;
+  socialOpenGraphFallbackIssues?: { missingTitle: boolean; missingImage: boolean; missingDescription: boolean; isFallbackIncomplete: boolean };
+  lazyLoadingStats?: { belowFoldMissingLazyCount: number; sampleImageUrls: string[] };
+  legacyFormatImages?: Array<{ url: string; format: string; byteSize: number }>;
+  unminifiedResources?: Array<{ url: string; type: "css" | "js"; byteSize: number }>;
   renderReason?: string;
   renderConfidence?: RenderConfidence;
+}
+
+export function synthesizeAuthoritativeFacts(page: CrawledPageData): AuthoritativePageFacts {
+  if (page.authoritativeSource === "rendered" && page.renderedFacts?.success) {
+    const rendered = page.renderedFacts;
+    return {
+      source: "rendered",
+      sourceMode: "rendered_playwright",
+      title: rendered.title || null,
+      metaDescription: rendered.metaDescription || null,
+      canonicalUrl: rendered.canonicalUrl || null,
+      h1Count: rendered.h1Count || 0,
+      h1Texts: rendered.h1Texts || [],
+      forms: rendered.forms || [],
+      formCount: rendered.forms?.length || 0,
+      unlabelledFormControlCount: rendered.unlabelledFormControlCount || 0,
+      missingAltCount: rendered.missingAltCount || 0,
+      images: rendered.images || [],
+      wordCount: rendered.mainContentWordCount || rendered.visibleBodyWordCount || 0,
+      mainText: "",
+      rawDocumentWordCount: rendered.rawDocumentWordCount || 0,
+      visibleBodyWordCount: rendered.visibleBodyWordCount || 0,
+      mainContentWordCount: rendered.mainContentWordCount || 0,
+      landmarks: rendered.landmarks || { hasMain: false, mainCount: 0, navCount: 0, footerCount: 0, headerCount: 0, asideCount: 0 },
+      hasMainLandmark: Boolean(rendered.hasMainLandmark),
+      headingsOutline: rendered.headingsOutline || [],
+      htmlLang: rendered.htmlLang || null,
+      buttons: rendered.buttons || [],
+      iframes: rendered.iframes || [],
+      isCompressionEnabled: rendered.isCompressionEnabled,
+      htmlCharset: rendered.htmlCharset || null,
+      hasValidCharset: rendered.hasValidCharset,
+      deprecatedHtmlTags: rendered.deprecatedHtmlTags || [],
+      targetBlankWithoutNoopenerLinks: rendered.targetBlankWithoutNoopenerLinks || [],
+      socialOpenGraphFallbackIssues: rendered.socialOpenGraphFallbackIssues,
+      lazyLoadingStats: rendered.lazyLoadingStats,
+      legacyFormatImages: rendered.legacyFormatImages || [],
+      unminifiedResources: rendered.unminifiedResources || [],
+      renderReason: rendered.renderReason,
+      renderConfidence: rendered.renderConfidence,
+    };
+  }
+
+  return {
+    source: "raw",
+    sourceMode: "raw_http",
+    title: page.title || null,
+    metaDescription: page.metaDescription || null,
+    canonicalUrl: page.canonicalUrl || (page as any).canonicalTag || null,
+    h1Count: page.h1Count !== undefined ? page.h1Count : ((page as any).h1 ? (page as any).h1.length : (page.h1s ? page.h1s.length : 0)),
+    h1Texts: page.h1Tags || page.h1s || (page as any).h1 || [],
+    forms: page.forms || [],
+    formCount: page.forms ? page.forms.length : 0,
+    unlabelledFormControlCount: page.forms ? page.forms.reduce((sum, f) => sum + f.unlabelledCount, 0) : 0,
+    missingAltCount: page.images ? page.images.filter((img) => !img.hasAltAttribute).length : 0,
+    images: page.images || [],
+    wordCount: page.wordCount || 0,
+    mainText: page.mainTextSnippet || "",
+    rawDocumentWordCount: page.rawDocumentWordCount || page.rawWordCount || page.wordCount || 0,
+    visibleBodyWordCount: page.visibleBodyWordCount || page.wordCount || 0,
+    mainContentWordCount: page.mainContentWordCount || page.wordCount || 0,
+    landmarks: page.landmarks || { hasMain: false, mainCount: 0, navCount: 0, footerCount: 0, headerCount: 0, asideCount: 0 },
+    hasMainLandmark: Boolean(page.landmarks?.hasMain),
+    headingsOutline: page.headingsOutline || [],
+    htmlLang: page.htmlLang || null,
+    buttons: page.buttons || [],
+    iframes: page.iframes || [],
+    isCompressionEnabled: page.isCompressionEnabled,
+    htmlCharset: page.htmlCharset || null,
+    hasValidCharset: page.hasValidCharset,
+    deprecatedHtmlTags: page.deprecatedHtmlTags || [],
+    targetBlankWithoutNoopenerLinks: page.targetBlankWithoutNoopenerLinks || [],
+    socialOpenGraphFallbackIssues: page.socialOpenGraphFallbackIssues,
+    lazyLoadingStats: page.lazyLoadingStats,
+    legacyFormatImages: page.legacyFormatImages || [],
+    unminifiedResources: page.unminifiedResources || [],
+    renderReason: page.renderReason,
+    renderConfidence: page.renderConfidence,
+  };
 }
 
 /**
@@ -415,27 +651,7 @@ export function getAuthoritativeFacts(page: CrawledPageData): AuthoritativePageF
   if (page.authoritativeFacts) {
     return page.authoritativeFacts;
   }
-  return {
-    source: page.sourceMode === "rendered_playwright" ? "rendered" : "raw",
-    title: page.title,
-    metaDescription: page.metaDescription,
-    canonicalUrl: page.canonicalUrl,
-    h1Count: page.h1Count,
-    h1Texts: page.h1s,
-    forms: page.forms,
-    formCount: page.forms.length,
-    unlabelledFormControlCount: page.forms.reduce((sum, f) => sum + f.unlabelledCount, 0),
-    missingAltCount: page.images.filter((img) => !img.hasAltAttribute).length,
-    images: page.images,
-    rawDocumentWordCount: page.rawDocumentWordCount || page.rawWordCount,
-    visibleBodyWordCount: page.visibleBodyWordCount || page.wordCount,
-    mainContentWordCount: page.mainContentWordCount || page.wordCount,
-    landmarks: page.landmarks,
-    hasMainLandmark: page.landmarks.hasMain,
-    headingsOutline: page.headingsOutline,
-    renderReason: page.renderReason,
-    renderConfidence: page.renderConfidence,
-  };
+  return synthesizeAuthoritativeFacts(page);
 }
 
 /**
@@ -461,14 +677,11 @@ export interface CrawledPageData {
   rawFacts?: RawPageFacts;
   renderedFacts?: RenderedPageFacts;
   authoritativeFacts?: AuthoritativePageFacts;
-
-  // Render Decision Metadata
+  authoritativeSource?: "raw" | "rendered";
   renderDecision?: RenderDecision;
-
-  // Rendering & Completeness
-  renderMode: RenderMode;
+  renderMode?: RenderMode;
   renderReason?: string;
-  renderConfidence: RenderConfidence;
+  renderConfidence?: RenderConfidence;
   rawWordCount: number;
   renderedWordCount?: number;
   rawDocumentWordCount: number;
@@ -509,23 +722,35 @@ export interface CrawledPageData {
   images: ImageAsset[];
   resources: ResourceAsset[];
   outlinks: OutlinkEntry[];
-  openGraph: {
-    title?: string | null;
-    description?: string | null;
-    image?: string | null;
-    url?: string | null;
-    type?: string | null;
-  };
-  twitterCard: {
-    card?: string | null;
-    title?: string | null;
-    description?: string | null;
-    image?: string | null;
-  };
+  openGraph: OpenGraphData;
+  twitterCard: TwitterCardData;
   schemaJsonLd: JsonLdBlock[];
   classification: PageClassification;
   simHashFingerprint?: string;
   mainTextSnippet?: string;
+  allCanonicalTags?: Array<{ href: string; inHead: boolean; isValidUrl: boolean; rawHref: string }>;
+  viewport?: { tagPresent: boolean; content: string | null; isValid: boolean; issues: string[] };
+  hreflangTags?: Array<{ hreflang: string; href: string; isValidLang: boolean; resolvedUrl: string }>;
+  mixedContentResources?: Array<{ url: string; type: "image" | "script" | "stylesheet" }>;
+  titleTagsCount?: number;
+  metaDescriptionTagsCount?: number;
+  rawHtmlByteLength?: number;
+  robotsDirectives?: { metaRobots: string | null; googlebotMeta: string | null; xRobotsTag: string | null; hasNoindex: boolean; hasNofollow: boolean; conflict: boolean; conflictReason?: string };
+  hasMetaRefresh?: boolean;
+  metaRefreshTarget?: string | null;
+  robotsHasNoSitemap?: boolean;
+  htmlLang?: string | null;
+  buttons?: ButtonFact[];
+  iframes?: IframeFact[];
+  isCompressionEnabled?: boolean;
+  htmlCharset?: string | null;
+  hasValidCharset?: boolean;
+  deprecatedHtmlTags?: string[];
+  targetBlankWithoutNoopenerLinks?: Array<{ href: string; text: string; rel: string | null }>;
+  socialOpenGraphFallbackIssues?: { missingTitle: boolean; missingImage: boolean; missingDescription: boolean; isFallbackIncomplete: boolean };
+  lazyLoadingStats?: { belowFoldMissingLazyCount: number; sampleImageUrls: string[] };
+  legacyFormatImages?: Array<{ url: string; format: string; byteSize: number }>;
+  unminifiedResources?: Array<{ url: string; type: "css" | "js"; byteSize: number }>;
 }
 
 export interface DiagnosticEvidence {
@@ -542,6 +767,7 @@ export interface DiagnosticEvidence {
   renderReason?: string;
   renderConfidence?: RenderConfidence;
   componentClassification?: "global_template" | "page_primary" | "unknown";
+  occurrences?: StructuredOccurrence[];
 }
 
 export interface DiagnosticIssue {
@@ -613,7 +839,8 @@ export interface SitemapUrlEntry {
   lastmod?: string;
   changefreq?: string;
   priority?: string;
-  sourceSitemap: string;
+  sourceSitemap?: string;
+  isDisallowed?: boolean;
 }
 
 export interface CrawlInventory {
@@ -625,6 +852,22 @@ export interface CrawlInventory {
   sitemapDiscoveredCount: number;
   sitemapOrphanCount: number;
   crawlIsolatedCount: number;
+  // Completeness Metrics
+  sitemapUrlsDiscovered?: number;
+  internalUrlsDiscovered?: number;
+  urlsQueued?: number;
+  urlsAttempted?: number;
+  urlsSuccessfullyFetched?: number;
+  urlsEvaluated?: number;
+  urlsExcludedIntentionally?: number;
+  urlsBlockedByRobots?: number;
+  urlsRedirected?: number;
+  urlsFailed?: number;
+  urlsRemainingInQueue?: number;
+  maxPagesConfigured?: number;
+  crawlTerminationReason?: CrawlTerminationReason;
+  isGraphDiscoveryComplete?: boolean;
+  crawlCoverageEvaluation?: "FULL_COVERAGE" | "LIMITED_BY_MAX_PAGES" | "PARTIAL_CRAWL";
 }
 
 export interface CategoryScoreSummary {
@@ -672,4 +915,6 @@ export interface CrawlAuditResult {
     botBlockedExternalCount: number;
     externalLinkTelemetry: ExternalLinkTelemetry;
   };
+  ruleExecutionObservability?: RuleExecutionRecord[];
+  scoreModelVersion?: string;
 }

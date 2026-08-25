@@ -28,6 +28,7 @@ export async function buildAndAnalyzeGraph(
   crawledPages: CrawledPageData[],
   sitemapUrls: SitemapUrlEntry[],
   signal?: AbortSignal,
+  options?: { isGraphDiscoveryComplete?: boolean }
 ): Promise<LinkGraphAnalysis> {
   const crawledUrlSet = new Set<string>();
   const pageStatusMap = new Map<string, number>();
@@ -282,11 +283,18 @@ export async function buildAndAnalyzeGraph(
   };
 
   // 4. Detect True Sitemap Orphans
+  // Invariant: A sitemap URL may ONLY be classified as an orphan when internal-link graph discovery
+  // was sufficiently complete (e.g. crawl queue was exhausted naturally).
+  // If the crawl was truncated/limited (e.g. maxPages was reached before visiting sitemap URLs),
+  // unvisited URLs must NOT be classified as sitemap orphans because the crawler never evaluated their inlinks.
+  const isGraphDiscoveryComplete = options?.isGraphDiscoveryComplete ?? true;
   const sitemapOrphans: SitemapUrlEntry[] = [];
-  for (const sitemapEntry of sitemapUrls) {
-    const norm = normalizeUrl(sitemapEntry.loc);
-    if (norm && !crawledUrlSet.has(norm)) {
-      sitemapOrphans.push(sitemapEntry);
+  if (isGraphDiscoveryComplete) {
+    for (const sitemapEntry of sitemapUrls) {
+      const norm = normalizeUrl(sitemapEntry.loc);
+      if (norm && !crawledUrlSet.has(norm)) {
+        sitemapOrphans.push(sitemapEntry);
+      }
     }
   }
 
