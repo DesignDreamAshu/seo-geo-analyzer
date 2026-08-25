@@ -508,6 +508,7 @@ export interface RenderedPageFacts {
   renderedAt?: string;
   renderReason?: string;
   renderConfidence?: RenderConfidence;
+  authorityReason?: string;
   title?: string | null;
   metaDescription?: string | null;
   canonicalUrl?: string | null;
@@ -573,6 +574,7 @@ export interface AuthoritativePageFacts {
   unminifiedResources?: Array<{ url: string; type: "css" | "js"; byteSize: number }>;
   renderReason?: string;
   renderConfidence?: RenderConfidence;
+  authorityReason?: string;
 }
 
 export function synthesizeAuthoritativeFacts(page: CrawledPageData): AuthoritativePageFacts {
@@ -692,6 +694,7 @@ export interface CrawledPageData {
   renderMode?: RenderMode;
   renderReason?: string;
   renderConfidence?: RenderConfidence;
+  authorityReason?: string;
   rawWordCount: number;
   renderedWordCount?: number;
   rawDocumentWordCount: number;

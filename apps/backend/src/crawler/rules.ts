@@ -1006,10 +1006,13 @@ export function evaluateAllDiagnosticRules(
     // Separate H1 Checks (guarded for render confidence)
     const hasValidH1 = facts.h1Count > 0 && facts.h1Texts.some((t) => t && t.trim().length > 0);
     if (!hasValidH1 && isStandardContentPage && facts.renderConfidence !== "manual_review") {
+      const existingHeadingsSample = facts.headingsOutline.slice(0, 3).map((h) => `<h${h.level}> "${h.text.slice(0, 35)}"`).join(", ");
       missingH1Pages.push({
         url: page.url,
         evidence: {
-          observed: `Missing <h1> tag on ${page.classification.primaryClass} page (H1 count = 0)`,
+          observed: `Missing <h1> tag on ${page.classification.primaryClass} page (H1 count = 0, existing headings: ${existingHeadingsSample || "none"})`,
+          domSelector: facts.hasMainLandmark ? "main" : "body",
+          codeSnippet: existingHeadingsSample ? `Existing headings: ${existingHeadingsSample}` : undefined,
           crawlTimestamp: page.crawledAt,
           sourceMode: factSource,
           sourceUrl: page.url,
@@ -1017,6 +1020,7 @@ export function evaluateAllDiagnosticRules(
           authoritativeFactSource: facts.source,
           renderReason: facts.renderReason,
           renderConfidence: facts.renderConfidence,
+          authorityReason: facts.authorityReason || (page as any).authorityReason,
         },
       });
     } else if (facts.h1Count > 1 && isStandardContentPage) {
@@ -1082,10 +1086,13 @@ export function evaluateAllDiagnosticRules(
       facts.renderConfidence === "manual_review";
     const wordsToEvaluate = facts.mainContentWordCount;
     if (!isUtilityOrForm && isStandardContentPage && wordsToEvaluate < 180) {
+      const textSample = (facts.mainText || (page as any).mainContentText || (page as any).visibleText || "").slice(0, 100);
       thinContentPages.push({
         url: page.url,
         evidence: {
           observed: `Authoritative main content text has only ${wordsToEvaluate} words on ${page.classification.primaryClass} page (Source: ${facts.source}, Visible: ${facts.visibleBodyWordCount})`,
+          domSelector: facts.hasMainLandmark ? "main" : "body",
+          codeSnippet: textSample ? `Text sample: "${textSample}..."` : undefined,
           crawlTimestamp: page.crawledAt,
           sourceMode: factSource,
           sourceUrl: page.url,
@@ -1093,6 +1100,7 @@ export function evaluateAllDiagnosticRules(
           authoritativeFactSource: facts.source,
           renderReason: facts.renderReason,
           renderConfidence: facts.renderConfidence,
+          authorityReason: facts.authorityReason || (page as any).authorityReason,
         },
       });
     }
@@ -1699,7 +1707,8 @@ export function evaluateAllDiagnosticRules(
         });
       }
 
-      if (!img.hasDimensions && !img.src.includes(".svg")) {
+      const isSvg = img.src.includes(".svg") || img.src.startsWith("data:image/svg");
+      if (!img.hasDimensions && !isSvg) {
         missingDimensionsPages.push({
           url: page.url,
           evidence: {
@@ -2054,7 +2063,9 @@ export function evaluateAllDiagnosticRules(
       missingMainPages.push({
         url: page.url,
         evidence: {
-          observed: "Page is missing a semantic <main> or role='main' landmark container",
+          observed: `Page is missing a semantic <main> or role='main' landmark container (Other landmarks: header=${facts.landmarks.headerCount}, nav=${facts.landmarks.navCount}, footer=${facts.landmarks.footerCount})`,
+          domSelector: "body",
+          codeSnippet: `Found other landmarks: <header> (${facts.landmarks.headerCount}), <nav> (${facts.landmarks.navCount}), <footer> (${facts.landmarks.footerCount})`,
           crawlTimestamp: page.crawledAt,
           sourceMode: factSource,
           sourceUrl: page.url,
@@ -2062,6 +2073,7 @@ export function evaluateAllDiagnosticRules(
           authoritativeFactSource: facts.source,
           renderReason: facts.renderReason,
           renderConfidence: facts.renderConfidence,
+          authorityReason: facts.authorityReason || (page as any).authorityReason,
         },
       });
     } else if (facts.landmarks.mainCount > 1) {

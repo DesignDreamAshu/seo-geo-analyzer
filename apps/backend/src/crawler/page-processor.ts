@@ -62,7 +62,29 @@ export function evaluateRenderEligibility(
   }
 
   // 3. Interactive Form Shells where raw DOM has 0 forms
-  const isFormPage = pClass === "form_application" || urlLower.includes("/application") || urlLower.includes("/contact");
+  const isSoftwareServicePhrase =
+    urlLower.includes("application-development") ||
+    urlLower.includes("application-architecture") ||
+    urlLower.includes("application-security") ||
+    urlLower.includes("application-modernization") ||
+    urlLower.includes("application-maintenance") ||
+    urlLower.includes("application-migration") ||
+    urlLower.includes("enterprise-application") ||
+    urlLower.includes("web-application") ||
+    urlLower.includes("mobile-application");
+
+  const isFormPage =
+    !isSoftwareServicePhrase &&
+    (
+      pClass === "form_application" ||
+      urlLower.includes("/job-application") ||
+      urlLower.includes("/application-form") ||
+      urlLower.includes("/career-apply") ||
+      urlLower.includes("/careers/apply") ||
+      urlLower.includes("/apply-now") ||
+      urlLower.includes("/apply") ||
+      urlLower.includes("/contact")
+    );
   if (isFormPage && page.forms.length === 0) {
     reasons.push("application_form_shell");
   }
@@ -113,8 +135,81 @@ export function evaluateRenderEligibility(
 }
 
 /**
- * Unified Authoritative Page Processor used by both real audit crawl and verification parity.
+ * Assesses whether a rendered DOM snapshot is complete, trustworthy, and stable,
+ * or whether it represents an unhydrated shell, skeleton, or hydration collapse.
  */
+export function evaluateRenderReliability(
+  rawFacts: RawPageFacts,
+  renderedDom: any
+): { isReliable: boolean; authoritySource: "rendered" | "raw"; authorityReason: string; confidence: RenderConfidence } {
+  const rawWords = rawFacts.visibleBodyWordCount || rawFacts.mainContentWordCount || 0;
+  const rendWords = renderedDom.visWords || renderedDom.mainWords || 0;
+  const rawH1Count = rawFacts.h1Count || 0;
+  const rendH1Count = renderedDom.h1Texts?.length || 0;
+  const rawHasMain = Boolean(rawFacts.hasMainLandmark);
+  const rendHasMain = Boolean(renderedDom.landmarks?.hasMain);
+
+  // 1. Severe Hydration Collapse: Raw HTML contained substantial content (>100 words),
+  // but rendered snapshot collapsed into a minimal loading/skeleton shell (<25 words)
+  if (rawWords > 100 && rendWords < 25) {
+    return {
+      isReliable: false,
+      authoritySource: "raw",
+      authorityReason: "rendered_hydration_collapse_rejected",
+      confidence: "unreliable",
+    };
+  }
+
+  // 2. Structural & Content Collapse: Raw HTML had a valid H1 and substantial text (>80 words),
+  // but rendered DOM lost the H1 and suffered >75% content reduction
+  if (rawH1Count > 0 && rendH1Count === 0 && rawWords > 80 && rendWords < rawWords * 0.25) {
+    return {
+      isReliable: false,
+      authoritySource: "raw",
+      authorityReason: "rendered_structural_collapse_rejected",
+      confidence: "unreliable",
+    };
+  }
+
+  // 3. Landmark & Content Collapse: Raw HTML had a valid <main> landmark and >80 words,
+  // but rendered DOM dropped <main> and lost >75% content
+  if (rawHasMain && !rendHasMain && rawWords > 80 && rendWords < rawWords * 0.25) {
+    return {
+      isReliable: false,
+      authoritySource: "raw",
+      authorityReason: "rendered_landmark_collapse_rejected",
+      confidence: "unreliable",
+    };
+  }
+
+  // 4. Consistent Minimal Page: Both raw and render agree on small word counts (e.g. 15 words)
+  if (rawWords < 50 && rendWords < 50 && Math.abs(rawWords - rendWords) < 30) {
+    return {
+      isReliable: true,
+      authoritySource: "rendered",
+      authorityReason: "consistent_minimal_page",
+      confidence: "high",
+    };
+  }
+
+  // 5. Client-Side Hydration Enrichment: Raw HTML was an empty JS shell, render expanded into full content
+  if (rawWords < 50 && rendWords >= 50) {
+    return {
+      isReliable: true,
+      authoritySource: "rendered",
+      authorityReason: "client_side_hydration_complete",
+      confidence: "high",
+    };
+  }
+
+  // 6. Legitimate Rendered State: Rendered snapshot is complete, substantial, and structurally sound
+  return {
+    isReliable: true,
+    authoritySource: "rendered",
+    authorityReason: "rendered_dom_authoritative",
+    confidence: "high",
+  };
+}
 export async function processPageAuthoritatively(
   url: string,
   normalizedUrl: string,
@@ -181,8 +276,50 @@ export async function processPageAuthoritatively(
         let renderedDom: any;
         try {
           const pwPage = await context.newPage();
-          await pwPage.goto(url, { waitUntil: "domcontentloaded", timeout: 10000 });
-          await pwPage.waitForTimeout(300);
+          await pwPage.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+
+          // Bounded render-readiness loop (generic across React/Vue/SPA frameworks)
+          // Polling interval: 150ms, maximum budget: 2500ms
+          const maxWaitBudgetMs = 2500;
+          const pollIntervalMs = 150;
+          const startWait = Date.now();
+          let previousTextLength = -1;
+          let stableCount = 0;
+
+          while (Date.now() - startWait < maxWaitBudgetMs) {
+            const readiness = await pwPage.evaluate(() => {
+              const body = document.body;
+              if (!body) return { ready: false, textLen: 0 };
+              const visText = (body.innerText || "").replace(/\s+/g, " ").trim();
+              const textLen = visText.length;
+              const words = visText ? visText.split(/\s+/).filter(Boolean).length : 0;
+              const hasMain = document.querySelectorAll("main, [role='main'], #main-content, .main-content, article").length > 0;
+              const h1Count = document.querySelectorAll("h1").length;
+              const lower = visText.toLowerCase();
+              const isSkeletonOrLoading =
+                words < 20 &&
+                (lower.includes("loading") || lower.includes("skeleton") || lower.includes("please wait") || lower.includes("fetching"));
+              const rootEl = document.querySelector("#root, #__next, #app, [data-reactroot]");
+              const rootReady = rootEl ? rootEl.children.length > 0 && (rootEl.textContent || "").trim().length > 30 : true;
+
+              const ready = !isSkeletonOrLoading && (hasMain || h1Count > 0 || words >= 35) && rootReady;
+              return { ready, textLen };
+            });
+
+            if (readiness.ready) {
+              if (readiness.textLen === previousTextLength) {
+                stableCount++;
+                if (stableCount >= 1) {
+                  break;
+                }
+              } else {
+                stableCount = 0;
+              }
+            }
+
+            previousTextLength = readiness.textLen;
+            await pwPage.waitForTimeout(pollIntervalMs);
+          }
 
           renderedDom = await pwPage.evaluate(() => {
             const docTitle = document.title ? document.title.trim() : null;
@@ -257,23 +394,32 @@ export async function processPageAuthoritatively(
 
             const imgNodes = Array.from(document.querySelectorAll("img"));
             const missingAlt = imgNodes.filter((img) => !img.hasAttribute("alt")).length;
-            const images = imgNodes.map((img) => ({
-              url: img.src || "",
-              src: img.src || "",
-              rawSrc: img.getAttribute("src") || "",
-              alt: img.getAttribute("alt") || null,
-              altText: img.getAttribute("alt") || null,
-              hasAltAttribute: img.hasAttribute("alt"),
-              altState: (img.hasAttribute("alt")
-                ? (img.getAttribute("alt")?.trim() ? "descriptive_alt_present" : "empty_alt_decorative")
-                : "missing_alt_attribute") as any,
-              width: null,
-              height: null,
-              isLazyLoaded: img.getAttribute("loading") === "lazy",
-              isExternal: false,
-              isDecorative: img.hasAttribute("alt") && !img.getAttribute("alt")?.trim(),
-              isLinked: Boolean(img.closest("a")),
-            }));
+            const images = imgNodes.map((img) => {
+              const widthAttr = img.getAttribute("width");
+              const heightAttr = img.getAttribute("height");
+              const width = widthAttr ? parseInt(widthAttr, 10) : (img.naturalWidth > 0 ? img.naturalWidth : null);
+              const height = heightAttr ? parseInt(heightAttr, 10) : (img.naturalHeight > 0 ? img.naturalHeight : null);
+              const hasDimensions = Boolean(img.hasAttribute("width") && img.hasAttribute("height")) || Boolean(width && height);
+
+              return {
+                url: img.src || "",
+                src: img.src || "",
+                rawSrc: img.getAttribute("src") || "",
+                alt: img.getAttribute("alt") || null,
+                altText: img.getAttribute("alt") || null,
+                hasAltAttribute: img.hasAttribute("alt"),
+                altState: (img.hasAttribute("alt")
+                  ? (img.getAttribute("alt")?.trim() ? "descriptive_alt_present" : "empty_alt_decorative")
+                  : "missing_alt_attribute") as any,
+                width,
+                height,
+                hasDimensions,
+                isLazyLoaded: img.getAttribute("loading") === "lazy",
+                isExternal: false,
+                isDecorative: img.hasAttribute("alt") && !img.getAttribute("alt")?.trim(),
+                isLinked: Boolean(img.closest("a")),
+              };
+            });
 
             const mainNodes = document.querySelectorAll("main, [role='main']");
             const hasMain = mainNodes.length > 0;
@@ -306,12 +452,15 @@ export async function processPageAuthoritatively(
 
         renderDecision.success = true;
 
+        const reliability = evaluateRenderReliability(rawFacts, renderedDom);
+
         const renderedFacts: RenderedPageFacts = {
           attempted: true,
           success: true,
           renderedAt: new Date().toISOString(),
           renderReason: renderDecision.reasons.join(", "),
-          renderConfidence: "high",
+          renderConfidence: reliability.confidence,
+          authorityReason: reliability.authorityReason,
           title: renderedDom.docTitle,
           metaDescription: renderedDom.metaDesc,
           canonicalUrl: renderedDom.canonicalTag,
@@ -319,7 +468,7 @@ export async function processPageAuthoritatively(
           h1Texts: renderedDom.h1Texts,
           forms: renderedDom.forms,
           formCount: renderedDom.forms.length,
-          unlabelledFormControlCount: renderedDom.forms.reduce((sum, f) => sum + f.unlabelledCount, 0),
+          unlabelledFormControlCount: renderedDom.forms.reduce((sum: number, f: any) => sum + f.unlabelledCount, 0),
           missingAltCount: renderedDom.missingAlt,
           images: renderedDom.images,
           visibleBodyWordCount: renderedDom.visWords,
@@ -330,52 +479,84 @@ export async function processPageAuthoritatively(
         };
         pageData.renderedFacts = renderedFacts;
 
-        // Unconditionally set Authoritative Facts from Rendered DOM (No length > 0 conditionals)
-        const authoritativeFacts: AuthoritativePageFacts = {
-          source: "rendered",
-          title: renderedDom.docTitle,
-          metaDescription: renderedDom.metaDesc || rawFacts.metaDescription,
-          canonicalUrl: renderedDom.canonicalTag || rawFacts.canonicalUrl,
-          h1Count: renderedDom.h1Texts.length,
-          h1Texts: renderedDom.h1Texts,
-          forms: renderedDom.forms,
-          formCount: renderedDom.forms.length,
-          unlabelledFormControlCount: renderedDom.forms.reduce((sum, f) => sum + f.unlabelledCount, 0),
-          missingAltCount: renderedDom.missingAlt,
-          images: renderedDom.images,
-          rawDocumentWordCount: rawFacts.rawDocumentWordCount,
-          visibleBodyWordCount: renderedDom.visWords,
-          mainContentWordCount: renderedDom.mainWords,
-          landmarks: renderedDom.landmarks,
-          hasMainLandmark: renderedDom.landmarks.hasMain,
-          headingsOutline: renderedDom.hOutline,
-          renderReason: renderDecision.reasons.join(", "),
-          renderConfidence: "high",
-        };
-        pageData.authoritativeFacts = authoritativeFacts;
+        if (reliability.authoritySource === "rendered") {
+          // Rendered DOM is Reliable and Authoritative
+          const authoritativeFacts: AuthoritativePageFacts = {
+            source: "rendered",
+            title: renderedDom.docTitle,
+            metaDescription: renderedDom.metaDesc || rawFacts.metaDescription,
+            canonicalUrl: renderedDom.canonicalTag || rawFacts.canonicalUrl,
+            h1Count: renderedDom.h1Texts.length,
+            h1Texts: renderedDom.h1Texts,
+            forms: renderedDom.forms,
+            formCount: renderedDom.forms.length,
+            unlabelledFormControlCount: renderedDom.forms.reduce((sum: number, f: any) => sum + f.unlabelledCount, 0),
+            missingAltCount: renderedDom.missingAlt,
+            images: renderedDom.images,
+            rawDocumentWordCount: rawFacts.rawDocumentWordCount,
+            visibleBodyWordCount: renderedDom.visWords,
+            mainContentWordCount: renderedDom.mainWords,
+            landmarks: renderedDom.landmarks,
+            hasMainLandmark: renderedDom.landmarks.hasMain,
+            headingsOutline: renderedDom.hOutline,
+            renderReason: renderDecision.reasons.join(", "),
+            renderConfidence: reliability.confidence,
+            authorityReason: reliability.authorityReason,
+          };
+          pageData.authoritativeFacts = authoritativeFacts;
+          pageData.authoritativeSource = "rendered";
+          pageData.sourceMode = "rendered_playwright";
+          pageData.renderMode = "playwright_rendered";
+          pageData.renderReason = renderDecision.reasons.join(", ");
+          pageData.renderConfidence = reliability.confidence;
+          pageData.authorityReason = reliability.authorityReason;
+          pageData.title = authoritativeFacts.title;
+          pageData.titleLength = authoritativeFacts.title ? authoritativeFacts.title.length : 0;
+          pageData.h1s = [...authoritativeFacts.h1Texts];
+          pageData.h1Count = authoritativeFacts.h1Count;
+          pageData.h1Tags = [...authoritativeFacts.h1Texts];
+          pageData.forms = authoritativeFacts.forms;
+          pageData.landmarks = authoritativeFacts.landmarks;
+          pageData.images = authoritativeFacts.images;
+          pageData.visibleBodyWordCount = authoritativeFacts.visibleBodyWordCount;
+          pageData.mainContentWordCount = authoritativeFacts.mainContentWordCount;
+          pageData.wordCount = authoritativeFacts.mainContentWordCount > 0 ? authoritativeFacts.mainContentWordCount : authoritativeFacts.visibleBodyWordCount;
+          pageData.headingsOutline = authoritativeFacts.headingsOutline;
 
-        // Unconditionally Synchronize Top-Level Compatibility Properties
-        pageData.sourceMode = "rendered_playwright";
-        pageData.renderMode = "playwright_rendered";
-        pageData.renderReason = renderDecision.reasons.join(", ");
-        pageData.renderConfidence = "high";
-        pageData.title = authoritativeFacts.title;
-        pageData.titleLength = authoritativeFacts.title ? authoritativeFacts.title.length : 0;
-        pageData.h1s = [...authoritativeFacts.h1Texts];
-        pageData.h1Count = authoritativeFacts.h1Count;
-        pageData.h1Tags = [...authoritativeFacts.h1Texts];
-        pageData.forms = authoritativeFacts.forms;
-        pageData.landmarks = authoritativeFacts.landmarks;
-        pageData.images = authoritativeFacts.images;
-        pageData.visibleBodyWordCount = authoritativeFacts.visibleBodyWordCount;
-        pageData.mainContentWordCount = authoritativeFacts.mainContentWordCount;
-        pageData.wordCount = authoritativeFacts.mainContentWordCount > 0 ? authoritativeFacts.mainContentWordCount : authoritativeFacts.visibleBodyWordCount;
-        pageData.headingsOutline = authoritativeFacts.headingsOutline;
-
-        // Re-validate heading hierarchy against authoritative rendered outline
-        const renderedHeadingValidation = validateHeadingOutlineHierarchy(authoritativeFacts.headingsOutline);
-        pageData.headingsHierarchyValid = renderedHeadingValidation.valid;
-        pageData.headingsHierarchyIssues = renderedHeadingValidation.issues;
+          const renderedHeadingValidation = validateHeadingOutlineHierarchy(authoritativeFacts.headingsOutline);
+          pageData.headingsHierarchyValid = renderedHeadingValidation.valid;
+          pageData.headingsHierarchyIssues = renderedHeadingValidation.issues;
+        } else {
+          // Rendered Snapshot Collapsed / Unreliable: Preserve Valid Raw Facts
+          pageData.authoritativeFacts = {
+            source: "raw",
+            title: rawFacts.title,
+            metaDescription: rawFacts.metaDescription,
+            canonicalUrl: rawFacts.canonicalUrl,
+            h1Count: rawFacts.h1Count,
+            h1Texts: [...rawFacts.h1Texts],
+            forms: rawFacts.forms,
+            formCount: rawFacts.formCount,
+            unlabelledFormControlCount: rawFacts.unlabelledFormControlCount,
+            missingAltCount: rawFacts.missingAltCount,
+            images: rawFacts.images,
+            rawDocumentWordCount: rawFacts.rawDocumentWordCount,
+            visibleBodyWordCount: rawFacts.visibleBodyWordCount,
+            mainContentWordCount: rawFacts.mainContentWordCount,
+            landmarks: rawFacts.landmarks,
+            hasMainLandmark: rawFacts.hasMainLandmark,
+            headingsOutline: rawFacts.headingsOutline,
+            renderReason: renderDecision.reasons.join(", "),
+            renderConfidence: reliability.confidence,
+            authorityReason: reliability.authorityReason,
+          };
+          pageData.authoritativeSource = "raw";
+          pageData.sourceMode = "raw_http";
+          pageData.renderMode = "raw";
+          pageData.renderReason = renderDecision.reasons.join(", ");
+          pageData.renderConfidence = reliability.confidence;
+          pageData.authorityReason = reliability.authorityReason;
+        }
       }
     } catch {
       renderDecision.success = false;

@@ -340,8 +340,43 @@ export function classifyPage(
     return { primaryClass: "utility_legal", confidence: 0.96, signals };
   }
 
-  // 6. Form / Application
-  if (path.includes("apply") || path.includes("application") || path.includes("register") || path.includes("signup") || path.includes("login")) {
+  // 6. Form / Application (Strict semantic boundary: exclude software/service domains)
+  const isSoftwareServicePhrase =
+    path.includes("application-development") ||
+    path.includes("application-architecture") ||
+    path.includes("application-security") ||
+    path.includes("application-modernization") ||
+    path.includes("application-maintenance") ||
+    path.includes("application-migration") ||
+    path.includes("application-management") ||
+    path.includes("application-engineering") ||
+    path.includes("application-services") ||
+    path.includes("application-integration") ||
+    path.includes("enterprise-application") ||
+    path.includes("web-application") ||
+    path.includes("mobile-application") ||
+    path.includes("cloud-application");
+
+  const isFormApplicationPath =
+    !isSoftwareServicePhrase &&
+    (
+      path.includes("/apply") ||
+      path.includes("/job-application") ||
+      path.includes("/application-form") ||
+      path.includes("/career-apply") ||
+      path.includes("/careers/apply") ||
+      path.includes("/apply-now") ||
+      path.includes("/online-application") ||
+      path.includes("/submit-application") ||
+      (path.includes("/application/") && !isSoftwareServicePhrase) ||
+      path.endsWith("/application") ||
+      path.includes("/register") ||
+      path.includes("/signup") ||
+      path.includes("/login") ||
+      (hasForm && (path.includes("apply") || (path.includes("application") && !isSoftwareServicePhrase)))
+    );
+
+  if (isFormApplicationPath) {
     signals.push("form_path_keyword");
     if (hasForm) signals.push("form_element_present");
     return { primaryClass: "form_application", confidence: hasForm ? 0.92 : 0.75, signals };
