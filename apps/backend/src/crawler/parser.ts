@@ -1,5 +1,5 @@
 import * as cheerio from "cheerio";
-import { normalizeUrl, isUrlInScope, classifyResourceType, resolveAbsoluteHref, classifyLinkType } from "./normalizer";
+import { normalizeUrl, isUrlInScope, classifyResourceType, resolveAbsoluteHref, classifyLinkType, isValidNavigationalCandidate } from "./normalizer";
 import type {
   CrawledPageData,
   FormFact,
@@ -891,15 +891,30 @@ export function parseHtmlPage(
     }
   });
 
-  // Outlinks with Accessible Name & Link Classification
+  // Outlinks with Accessible Name & Strict Navigational Contract
   const outlinks: OutlinkEntry[] = [];
-  $("a[href]").each((_, el) => {
-    const rawHref = $(el).attr("href")?.trim();
-    if (!rawHref) return;
+  $("a[href], area[href]").each((_, el) => {
+    // Exclude non-anchor SVG elements (e.g. <textPath href="#...">, <use href="#...">)
+    const tagName = (el.tagName || "").toLowerCase();
+    const isInsideSvg = $(el).parents("svg").length > 0;
+    if (isInsideSvg && tagName !== "a") {
+      return;
+    }
 
-    const resolvedAbsoluteHref = resolveAbsoluteHref(rawHref, finalUrl) || rawHref;
+    const rawHref = $(el).attr("href")?.trim() || $(el).attr("xlink:href")?.trim();
+    if (!rawHref || !isValidNavigationalCandidate(rawHref)) return;
+
+    const resolvedAbsoluteHref = resolveAbsoluteHref(rawHref, finalUrl);
+    if (!resolvedAbsoluteHref) return;
+
     const normalizedTarget = normalizeUrl(rawHref, finalUrl);
+    if (!normalizedTarget) return;
+
     const linkClassification = classifyLinkType(rawHref, resolvedAbsoluteHref, seedUrl, allowSubdomains);
+    if (linkClassification === "invalid" || linkClassification === "placeholder_hash" || linkClassification === "fragment") {
+      return;
+    }
+
     const anchorText = $(el).text().replace(/\s+/g, " ").trim();
     const accessibleName = calculateAccessibleName($(el), $);
     const rel = $(el).attr("rel")?.toLowerCase() || "";
@@ -910,7 +925,7 @@ export function parseHtmlPage(
       targetUrl: rawHref,
       rawHref,
       resolvedAbsoluteHref,
-      normalizedTargetUrl: normalizedTarget || resolvedAbsoluteHref,
+      normalizedTargetUrl: normalizedTarget,
       anchorText,
       accessibleName,
       hasAccessibleName: accessibleName.length > 0,
@@ -918,6 +933,14 @@ export function parseHtmlPage(
       rel,
       isInternal,
       isNofollow,
+      provenance: {
+        sourcePage: finalUrl,
+        domElement: tagName,
+        attributeName: $(el).attr("href") !== undefined ? "href" : "xlink:href",
+        rawValue: rawHref,
+        normalizedUrl: normalizedTarget,
+        discoveryMethod: tagName === "area" ? "area_tag" : "anchor_tag",
+      },
     });
   });
 

@@ -142,6 +142,15 @@ export interface InlinkEntry {
   isImageLink: boolean;
 }
 
+export interface CandidateProvenance {
+  sourcePage: string;
+  domElement: string;
+  attributeName: string;
+  rawValue: string;
+  normalizedUrl: string;
+  discoveryMethod: "anchor_tag" | "area_tag" | "sitemap_loc" | "seed_url" | "canonical_fallback";
+}
+
 export interface OutlinkEntry {
   targetUrl: string;
   rawHref: string;
@@ -158,6 +167,7 @@ export interface OutlinkEntry {
   statusCategory?: ExternalLinkStatus | "internal_ok" | "internal_broken" | "internal_redirect";
   redirectHops?: RedirectHop[];
   isBroken?: boolean;
+  provenance?: CandidateProvenance;
 }
 
 export type BrowserPageState =

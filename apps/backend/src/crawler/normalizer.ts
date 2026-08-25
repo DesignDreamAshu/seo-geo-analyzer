@@ -26,13 +26,108 @@ const SAFE_STRIP_QUERY_PARAMS = new Set([
 ]);
 
 /**
+ * Non-navigational DOM tag names and MIME-type fragments that must never be treated as relative URLs.
+ */
+export const BARE_DOM_TAGS_AND_MIME_PATTERNS = new Set([
+  "svg",
+  "path",
+  "circle",
+  "rect",
+  "polygon",
+  "polyline",
+  "line",
+  "textpath",
+  "use",
+  "defs",
+  "g",
+  "symbol",
+  "clippath",
+  "mask",
+  "lineargradient",
+  "radialgradient",
+  "pattern",
+  "filter",
+  "fegaussianblur",
+  "div",
+  "span",
+  "body",
+  "html",
+  "head",
+  "script",
+  "style",
+  "button",
+  "form",
+  "input",
+  "textarea",
+  "select",
+  "option",
+  "table",
+  "tr",
+  "td",
+  "th",
+  "tbody",
+  "thead",
+  "footer",
+  "header",
+  "nav",
+  "main",
+  "section",
+  "article",
+  "aside",
+]);
+
+/**
+ * Validates if a raw candidate string represents a legitimate navigational link.
+ */
+export function isValidNavigationalCandidate(rawHref: string | null | undefined): boolean {
+  if (!rawHref || typeof rawHref !== "string") return false;
+  const trimmed = rawHref.trim();
+  if (!trimmed) return false;
+
+  const lower = trimmed.toLowerCase();
+
+  // 1. Reject in-page fragments & non-navigational schemes
+  if (
+    lower.startsWith("#") ||
+    lower.startsWith("javascript:") ||
+    lower.startsWith("mailto:") ||
+    lower.startsWith("tel:") ||
+    lower.startsWith("data:") ||
+    lower.startsWith("blob:") ||
+    lower.startsWith("about:") ||
+    lower.startsWith("sms:") ||
+    lower.startsWith("callto:")
+  ) {
+    return false;
+  }
+
+  // 2. Reject MIME types (e.g., image/svg+xml, application/pdf, text/html)
+  if (/^(?:image|text|application|font|audio|video)\/[a-z0-9+._-]+$/i.test(trimmed)) {
+    return false;
+  }
+
+  // 3. Reject bare DOM tag names unless explicitly a path with a slash, query, dot, or protocol
+  if (
+    BARE_DOM_TAGS_AND_MIME_PATTERNS.has(lower) &&
+    !trimmed.includes("/") &&
+    !trimmed.includes("?") &&
+    !trimmed.includes(".") &&
+    !trimmed.includes(":")
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * Normalizes a URL string into a standardized, canonical format for deduplication.
  */
 export function normalizeUrl(rawUrl: string, baseUrl?: string): string | null {
   if (!rawUrl || typeof rawUrl !== "string") return null;
 
   const trimmed = rawUrl.trim();
-  if (!trimmed || trimmed.startsWith("javascript:") || trimmed.startsWith("mailto:") || trimmed.startsWith("tel:") || trimmed.startsWith("data:")) {
+  if (!trimmed || !isValidNavigationalCandidate(trimmed)) {
     return null;
   }
 
@@ -103,13 +198,11 @@ export function isUrlInScope(candidateUrl: string, seedUrl: string, allowSubdoma
     }
 
     if (allowSubdomains) {
-      // e.g. candidate.hostname = blog.example.com, seed.hostname = example.com
       const seedHost = seed.hostname.replace(/^www\./, "");
       const candidateHost = candidate.hostname.replace(/^www\./, "");
       return candidateHost === seedHost || candidateHost.endsWith(`.${seedHost}`);
     }
 
-    // Exact hostname match (treating www and non-www as in-scope if target domain matches)
     const seedHost = seed.hostname.replace(/^www\./, "");
     const candidateHost = candidate.hostname.replace(/^www\./, "");
     return candidateHost === seedHost;
@@ -120,31 +213,25 @@ export function isUrlInScope(candidateUrl: string, seedUrl: string, allowSubdoma
 
 /**
  * Detects crawl traps such as repeating path segments or recursive directory loops.
- * e.g., /category/shoes/category/shoes/category/shoes...
  */
 export function isCrawlTrap(urlStr: string): boolean {
   try {
     const parsed = new URL(urlStr.startsWith("http") ? urlStr : `https://${urlStr}`);
     const segments = parsed.pathname.split("/").filter(Boolean);
 
-    // Trap 1: Excessive path depth (> 12 segments)
     if (segments.length > 12) return true;
-
-    // Trap 2: Excessive URL length (> 512 characters)
     if (urlStr.length > 512) return true;
 
-    // Trap 3: Repeating consecutive segments (e.g. /a/b/a/b or /item/item/item)
     const segmentCountMap = new Map<string, number>();
     for (const segment of segments) {
       const lower = segment.toLowerCase();
       const count = (segmentCountMap.get(lower) || 0) + 1;
       segmentCountMap.set(lower, count);
       if (count >= 4) {
-        return true; // same segment repeated 4+ times in path
+        return true;
       }
     }
 
-    // Trap 4: Repetitive calendar patterns (e.g. /2026/08/2026/08)
     const yearMatches = parsed.pathname.match(/\b(19\d\d|20\d\d)\b/g);
     if (yearMatches && yearMatches.length >= 3) {
       return true;
@@ -175,7 +262,6 @@ export function classifyResourceType(urlStr: string, contentType = ""): import("
   const lowerUrl = urlStr.toLowerCase();
   const lowerCt = contentType.toLowerCase();
 
-  // 1. XML Sitemaps
   if (
     lowerCt.includes("xml") ||
     lowerUrl.endsWith(".xml") ||
@@ -186,7 +272,6 @@ export function classifyResourceType(urlStr: string, contentType = ""): import("
     return "xml_sitemap";
   }
 
-  // 2. Cloudflare / CDN / Security / Utility endpoints
   if (
     lowerUrl.includes("/cdn-cgi/") ||
     lowerUrl.includes("email-protection") ||
@@ -197,7 +282,6 @@ export function classifyResourceType(urlStr: string, contentType = ""): import("
     return "utility_endpoint";
   }
 
-  // 3. Static Media Assets
   if (
     lowerCt.startsWith("image/") ||
     /\.(png|jpe?g|webp|gif|svg|ico|avif|bmp|tiff)(\?.*)?$/i.test(lowerUrl)
@@ -205,7 +289,6 @@ export function classifyResourceType(urlStr: string, contentType = ""): import("
     return "image";
   }
 
-  // 4. Scripts & Stylesheets
   if (lowerCt.includes("javascript") || /\.js(\?.*)?$/i.test(lowerUrl)) {
     return "script";
   }
@@ -213,7 +296,6 @@ export function classifyResourceType(urlStr: string, contentType = ""): import("
     return "stylesheet";
   }
 
-  // 5. Normal HTML Page
   if (lowerCt.includes("text/html") || lowerCt === "" || !/\.[a-z0-9]{2,5}$/i.test(lowerUrl)) {
     return "html_page";
   }
@@ -227,7 +309,7 @@ export function classifyResourceType(urlStr: string, contentType = ""): import("
 export function resolveAbsoluteHref(rawHref: string, baseUrl: string): string | null {
   if (!rawHref || typeof rawHref !== "string") return null;
   const trimmed = rawHref.trim();
-  if (!trimmed) return null;
+  if (!trimmed || !isValidNavigationalCandidate(trimmed)) return null;
 
   try {
     const resolved = new URL(trimmed, baseUrl);
@@ -246,33 +328,27 @@ export function classifyLinkType(
   seedUrl: string,
   allowSubdomains = false
 ): import("./types").LinkClassification {
-  if (!rawHref) return "invalid";
+  if (!rawHref || !isValidNavigationalCandidate(rawHref)) return "invalid";
   const trimmed = rawHref.trim();
   const lower = trimmed.toLowerCase();
 
-  // 1. Placeholder & interactive hash controls
   if (lower === "#" || lower === "#!" || lower === "javascript:void(0)" || lower === "javascript:void(0);") {
     return "placeholder_hash";
   }
 
-  // 2. JavaScript Actions
   if (lower.startsWith("javascript:")) {
     return "javascript_action";
   }
 
-  // 3. Mailto & Tel
   if (lower.startsWith("mailto:")) return "mailto";
   if (lower.startsWith("tel:")) return "tel";
 
-  // 4. In-page Fragment Link
   if (trimmed.startsWith("#")) return "fragment";
 
-  // 5. Downloads
   if (/\.(pdf|zip|docx?|xlsx?|csv|tar\.gz|dmg|exe)(\?.*)?$/i.test(lower)) {
     return "download";
   }
 
-  // 6. Absolute or resolved HTTP(S) URL
   if (resolvedUrl) {
     try {
       const parsed = new URL(resolvedUrl);
@@ -291,5 +367,3 @@ export function classifyLinkType(
 
   return "invalid";
 }
-
-

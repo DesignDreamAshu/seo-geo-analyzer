@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { normalizeUrl, isUrlInScope, isCrawlTrap } from "./normalizer";
+import { normalizeUrl, isUrlInScope, isCrawlTrap, classifyResourceType } from "./normalizer";
 import { fetchAndParseRobotsTxt } from "./robots";
 import { fetchAllSitemaps } from "./sitemap";
 import { fetchPageHtml } from "./fetcher";
@@ -145,17 +145,27 @@ export async function runSiteAuditCrawl(options: CrawlOptions): Promise<CrawlAud
           crawledMap.set(itemNormalized, pageData);
           console.log(`[Crawler] [${crawledMap.size}/${maxPages}] Fetched: ${pageData.statusCode} | ${pageData.responseTimeMs}ms | ${item.url} (Title: "${pageData.title || "Untitled"}")`);
 
-          // Enqueue newly discovered internal links if depth allows
+          // Enqueue newly discovered internal links if depth allows (Strict Page Crawl Filter)
           if (item.depth < maxDepth && fetchRes.ok) {
             for (const outlink of pageData.outlinks) {
               if (outlink.isInternal && outlink.normalizedTargetUrl && !queuedSet.has(outlink.normalizedTargetUrl)) {
-                if (!isCrawlTrap(outlink.normalizedTargetUrl)) {
-                  queuedSet.add(outlink.normalizedTargetUrl);
-                  queue.push({
-                    url: outlink.targetUrl,
-                    normalizedUrl: outlink.normalizedTargetUrl,
-                    depth: item.depth + 1,
-                  });
+                // Must not be a static asset (image, stylesheet, script) for normal page crawling
+                const resourceType = classifyResourceType(outlink.normalizedTargetUrl);
+                if (resourceType === "html_page" || resourceType === "xml_sitemap" || resourceType === "other") {
+                  if (!isCrawlTrap(outlink.normalizedTargetUrl)) {
+                    queuedSet.add(outlink.normalizedTargetUrl);
+                    queue.push({
+                      url: outlink.targetUrl,
+                      normalizedUrl: outlink.normalizedTargetUrl,
+                      depth: item.depth + 1,
+                    });
+
+                    if (process.env.DEBUG_CRAWLER_PROVENANCE || process.env.NODE_ENV === "test") {
+                      console.log(
+                        `[Crawler Provenance] Enqueued: ${outlink.normalizedTargetUrl} (from ${item.url} via <${outlink.provenance?.domElement || "a"} ${outlink.provenance?.attributeName || "href"}="${outlink.rawHref}">)`
+                      );
+                    }
+                  }
                 }
               }
             }
