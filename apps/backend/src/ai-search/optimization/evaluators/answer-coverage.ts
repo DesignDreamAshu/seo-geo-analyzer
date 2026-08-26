@@ -106,10 +106,22 @@ export function evaluateAnswerCoverage(
 
   // 2. Group prompts with PARTIAL or NOT COVERED answer on existing target page
   const partialAnswerMappings = mappings.filter(
-    (m) =>
-      m.targetPageUrl &&
-      (m.answerCoverage === "PARTIALLY_COVERED" || m.answerCoverage === "NOT_COVERED") &&
-      m.coverageState !== "NO_TARGET_PAGE"
+    (m) => {
+      if (!m.targetPageUrl) return false;
+      const urlLower = m.targetPageUrl.toLowerCase();
+      const isUtility =
+        urlLower.includes("/privacy") ||
+        urlLower.includes("/terms") ||
+        urlLower.includes("/cookie") ||
+        urlLower.includes("/legal") ||
+        urlLower.includes("/disclaimer");
+      if (isUtility) return false;
+
+      return (
+        (m.answerCoverage === "PARTIALLY_COVERED" || m.answerCoverage === "NOT_COVERED") &&
+        m.coverageState !== "NO_TARGET_PAGE"
+      );
+    }
   );
 
   // Group by target page URL to avoid duplicate findings for the same page

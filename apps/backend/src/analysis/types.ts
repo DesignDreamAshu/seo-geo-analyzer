@@ -48,6 +48,8 @@ export interface ModuleResult {
   lastChecked: string;
 }
 
+export type AnalysisModule = ModuleResult;
+
 export interface AnalyzeOptions {
   url: string;
   strategy?: AnalyzeStrategy;

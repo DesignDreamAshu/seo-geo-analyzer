@@ -872,12 +872,75 @@ export function parseHtmlPage(
       }
     }
 
-    const width = parseInt($(el).attr("width") || "0", 10) || null;
-    const height = parseInt($(el).attr("height") || "0", 10) || null;
+    const widthAttr = $(el).attr("width");
+    const heightAttr = $(el).attr("height");
+    const width = parseInt(widthAttr || "0", 10) || null;
+    const height = parseInt(heightAttr || "0", 10) || null;
+    const imageFilename = resolvedUrl.split("/").pop()?.split("?")[0] || src.split("/").pop()?.split("?")[0] || "image";
+
+    // DOM Hierarchy & Container Inference
+    const elId = $(el).attr("id") || null;
+    const elClasses = ($(el).attr("class") || "").trim().split(/\s+/).filter(Boolean);
+    const parent = $(el).parent();
+    const parentTag = parent.length > 0 ? parent.get(0)?.tagName?.toLowerCase() || null : null;
+    const parentId = parent.attr("id") || null;
+    const parentClasses = (parent.attr("class") || "").trim().split(/\s+/).filter(Boolean);
+
+    // Check containers: rich-text, article, symbols, cards
+    const richTextParent = $(el).closest(".w-richtext, .blog_body_rich_text, .blog-content, [class*='rich-text'], [class*='richtext']");
+    const whetherInsideRichText = richTextParent.length > 0;
+    let richTextContainerSelector: string | null = null;
+    if (whetherInsideRichText) {
+      const rtClass = richTextParent.attr("class")?.trim().split(/\s+/)[0];
+      richTextContainerSelector = rtClass ? `.${rtClass}` : ".w-richtext";
+    }
+
+    const articleParent = $(el).closest("article, [role='article']");
+    const whetherInsideArticle = articleParent.length > 0;
+
+    const cardParent = $(el).closest(".w-dyn-item, .blog-card, .case-study-card, .solution-card, [class*='card']");
+    let nearestStableContainerSelector: string | null = null;
+    let nearestStableContainerClasses: string[] = [];
+
+    if (richTextContainerSelector) {
+      nearestStableContainerSelector = richTextContainerSelector;
+      nearestStableContainerClasses = (richTextParent.attr("class") || "").trim().split(/\s+/).filter(Boolean);
+    } else if (cardParent.length > 0) {
+      const cardClass = cardParent.attr("class")?.trim().split(/\s+/)[0];
+      nearestStableContainerSelector = cardClass ? `.${cardClass}` : ".w-dyn-item";
+      nearestStableContainerClasses = (cardParent.attr("class") || "").trim().split(/\s+/).filter(Boolean);
+    } else if (parentClasses.length > 0) {
+      nearestStableContainerSelector = `.${parentClasses[0]}`;
+      nearestStableContainerClasses = parentClasses;
+    }
+
+    // Build stable DOM Selector
+    let domSelector = "img";
+    let selectorConfidence: "confirmed" | "likely" | "fragile" | "unavailable" = "likely";
+
+    if (elId) {
+      domSelector = `img#${elId}`;
+      selectorConfidence = "confirmed";
+    } else if (whetherInsideRichText && richTextContainerSelector) {
+      domSelector = `${richTextContainerSelector} img`;
+      selectorConfidence = "likely";
+    } else if (parentClasses.length > 0) {
+      domSelector = `.${parentClasses[0]} > img`;
+      selectorConfidence = "likely";
+    } else if (elClasses.length > 0) {
+      domSelector = `img.${elClasses.join(".")}`;
+      selectorConfidence = "likely";
+    } else {
+      domSelector = `img[src*="${imageFilename.slice(0, 30)}"]`;
+      selectorConfidence = "fragile";
+    }
+
+    const rawOuterHTML = $.html(el) || `<img src="${src}">`;
 
     images.push({
       src,
       resolvedUrl,
+      imageFilename,
       alt: altText,
       altText,
       altState,
@@ -887,10 +950,31 @@ export function parseHtmlPage(
       accessibleContext: isLinked ? $(el).parents("a").attr("aria-label") || null : null,
       width,
       height,
+      widthAttribute: widthAttr || null,
+      heightAttribute: heightAttr || null,
       hasDimensions: Boolean(width && height),
       srcset: $(el).attr("srcset") || null,
+      sizes: $(el).attr("sizes") || null,
       loading: $(el).attr("loading") || null,
+      fetchpriority: $(el).attr("fetchpriority") || null,
       format: resolvedUrl.split(".").pop()?.split("?")[0]?.toLowerCase() || null,
+      domSelector,
+      selectorConfidence,
+      elementTag: "img",
+      elementId: elId,
+      elementClasses: elClasses,
+      parentTag,
+      parentId,
+      parentClasses,
+      nearestStableContainerSelector,
+      nearestStableContainerClasses,
+      whetherInsideRichText,
+      richTextContainerSelector,
+      whetherInsideArticle,
+      rawOuterHTML,
+      renderedOuterHTML: rawOuterHTML,
+      sourceMode: "raw_http",
+      crawlTimestamp: new Date().toISOString(),
     });
   });
 

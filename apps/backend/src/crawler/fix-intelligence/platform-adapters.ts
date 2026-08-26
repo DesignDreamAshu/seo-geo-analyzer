@@ -4,6 +4,7 @@
  */
 
 import type { SupportedPlatform, PlatformSpecificGuidance } from "./types";
+export type { SupportedPlatform, PlatformSpecificGuidance };
 import type { CrawledPageData } from "../types";
 
 export interface PlatformDetectionResult {

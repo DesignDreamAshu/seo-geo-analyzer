@@ -55,10 +55,10 @@ it("A. SQLite initialization: Initializes in-memory SQLite database cleanly", ()
   expect(layer.db).toBeTruthy();
 });
 
-it("B. Schema migrations: Deterministic migrations run and record schema version 1", () => {
+it("B. Schema migrations: Deterministic migrations run and record schema version 4", () => {
   const mig = runMigrations(db);
-  expect(mig.currentVersion).toBe(1);
-  expect(mig.appliedCount).toBe(1);
+  expect(mig.currentVersion).toBe(4);
+  expect(mig.appliedCount).toBe(4);
 });
 
 it("C. Project creation: Persists project entity with normalized domain", async () => {
@@ -1241,22 +1241,12 @@ it("BW. Fix intelligence preservation: 95/95 Fix Intelligence preserved intact",
   expect(95).toBe(95);
 });
 
-// Execute runner sequentially
-async function runAllTests() {
-  console.log(`\n--- [PERSISTENCE SUITE] Phase 24: Local Project Persistence, Audit History & Change Intelligence (A to BW) ---`);
-  let passed = 0;
-  for (const t of tests) {
-    try {
-      await t.fn();
-      console.log(`  ✓ ${t.name}`);
-      passed++;
-    } catch (err: any) {
-      console.error(`  ❌ FAIL: ${t.name}`);
-      console.error(`     ${err.message}`);
-      process.exit(1);
-    }
-  }
-  console.log(`\nAll ${passed} Phase 24 certification tests passed cleanly.\n`);
-}
+import { describe, it as vitestIt } from "vitest";
 
-runAllTests();
+describe("Phase 24: Persistence Certification Suite (Tests A to BW)", () => {
+  for (const t of tests) {
+    vitestIt(t.name, async () => {
+      await t.fn();
+    });
+  }
+});

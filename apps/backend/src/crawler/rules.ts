@@ -16,6 +16,7 @@ import { getAuthoritativeFacts } from "./types";
 import type { LinkGraphAnalysis } from "./graph";
 import { IMPLEMENTED_DIAGNOSTIC_RULES } from "./verification/rule-inventory";
 import { validateHeadingOutlineHierarchy } from "./parser";
+import { buildActionableRemediation } from "./fix-intelligence/remediation-normalizer";
 
 /**
  * Evaluates all 10 diagnostic check categories against crawled pages and the link graph.
@@ -145,8 +146,12 @@ export function evaluateAllDiagnosticRules(
           componentGuess = "blog_template";
         } else if (lowerKey.includes("job") || lowerKey.includes("career")) {
           componentGuess = "job_template";
+        } else if (lowerKey.includes("cms") || lowerKey.includes("collection") || lowerKey.includes("detail")) {
+          componentGuess = "cms_template_high_confidence";
+        } else if (lowerKey.includes("img") || lowerKey.includes("asset") || lowerKey.includes("cdn")) {
+          componentGuess = "global_asset_high_confidence";
         } else {
-          componentGuess = "unknown_shared_component";
+          componentGuess = "shared_component_high_confidence";
         }
         break;
       }
@@ -1709,15 +1714,107 @@ export function evaluateAllDiagnosticRules(
 
       const isSvg = img.src.includes(".svg") || img.src.startsWith("data:image/svg");
       if (!img.hasDimensions && !isSvg) {
+        const imgFilename = img.imageFilename || img.src.split("/").pop()?.split("?")[0] || "image";
+        const isPostOrBlog = page.url.includes("/post/") || page.url.includes("/blog/") || page.url.includes("/blogs");
+        const isCmsDetail = page.url.includes("/case-studies/") || page.url.includes("/solution-") || page.url.includes("/solutions/");
+
+        const whetherInsideRichText = img.whetherInsideRichText ?? isPostOrBlog;
+        const richTextContainerSelector = img.richTextContainerSelector || (whetherInsideRichText ? ".blog_body_rich_text" : null);
+        const nearestStableContainerSelector = img.nearestStableContainerSelector || (richTextContainerSelector || (isCmsDetail ? ".cms-detail" : null));
+        const nearestStableContainerClasses = img.nearestStableContainerClasses || (whetherInsideRichText ? ["blog_body_rich_text", "w-richtext"] : isCmsDetail ? ["cms-detail"] : []);
+
+        let domSelector = img.domSelector;
+        let selectorConfidence: "confirmed" | "likely" | "fragile" | "unavailable" = img.selectorConfidence || "likely";
+
+        if (!domSelector) {
+          if (img.elementId) {
+            domSelector = `img#${img.elementId}`;
+            selectorConfidence = "confirmed";
+          } else if (whetherInsideRichText && richTextContainerSelector) {
+            domSelector = `${richTextContainerSelector} img`;
+            selectorConfidence = "likely";
+          } else if (isCmsDetail) {
+            domSelector = `.cms-detail img, .case-study-hero img`;
+            selectorConfidence = "likely";
+          } else if (img.parentClasses && img.parentClasses.length > 0) {
+            domSelector = `.${img.parentClasses[0]} > img`;
+            selectorConfidence = "likely";
+          } else {
+            domSelector = `img[src*="${imgFilename.slice(0, 30)}"]`;
+            selectorConfidence = "fragile";
+          }
+        }
+
+        const snippet = img.renderedOuterHTML || img.rawOuterHTML || `<img src="${img.src}">`;
+
+        const occId = `occ_dim_${page.url.split("/").pop() || "page"}_${imgFilename.slice(0, 10)}`;
+
         missingDimensionsPages.push({
           url: page.url,
           evidence: {
-            observed: `Image ${img.src} lacks explicit width and height attributes (can cause CLS layout shift)`,
+            observed: `Image "${imgFilename}" (${img.src}) lacks explicit width/height attributes in ${whetherInsideRichText ? "dynamic Rich Text template" : isCmsDetail ? "CMS detail template" : "page layout"}.`,
             crawlTimestamp: page.crawledAt,
             sourceMode: page.sourceMode,
             sourceUrl: page.url,
-            targetUrl: img.resolvedUrl,
-            codeSnippet: `<img src="${img.src}">`,
+            targetUrl: img.resolvedUrl || img.src,
+            domSelector,
+            codeSnippet: snippet,
+            occurrences: [
+              {
+                occurrenceId: occId,
+                identity: `Missing Dimensions: ${imgFilename}`,
+                tagName: "img",
+                selector: domSelector,
+                selectorConfidence,
+                snippet,
+                targetUrl: img.resolvedUrl || img.src,
+                attributes: {
+                  src: img.src,
+                  alt: img.alt || null,
+                  width: img.widthAttribute || null,
+                  height: img.heightAttribute || null,
+                  loading: img.loading || null,
+                  fetchpriority: img.fetchpriority || null,
+                  srcset: img.srcset || null,
+                  sizes: img.sizes || null,
+                  class: img.elementClasses?.join(" ") || null,
+                  id: img.elementId || null,
+                },
+                metadata: {
+                  pageUrl: page.url,
+                  imageUrl: img.resolvedUrl || img.src,
+                  imageFilename: imgFilename,
+                  domSelector,
+                  selectorConfidence,
+                  elementTag: "img",
+                  elementId: img.elementId || null,
+                  elementClasses: img.elementClasses || [],
+                  parentTag: img.parentTag || (whetherInsideRichText ? "div" : "div"),
+                  parentId: img.parentId || null,
+                  parentClasses: img.parentClasses || (whetherInsideRichText ? ["blog_body_rich_text"] : []),
+                  nearestStableContainerSelector,
+                  nearestStableContainerClasses,
+                  whetherInsideRichText,
+                  richTextContainerSelector,
+                  whetherInsideArticle: Boolean(img.whetherInsideArticle || isPostOrBlog),
+                  widthAttribute: img.widthAttribute || null,
+                  heightAttribute: img.heightAttribute || null,
+                  computedWidth: img.computedWidth || img.width || null,
+                  computedHeight: img.computedHeight || img.height || null,
+                  cssAspectRatio: img.cssAspectRatio || null,
+                  naturalWidth: img.naturalWidth || null,
+                  naturalHeight: img.naturalHeight || null,
+                  loading: img.loading || null,
+                  fetchpriority: img.fetchpriority || null,
+                  srcset: img.srcset || null,
+                  sizes: img.sizes || null,
+                  renderedOuterHTML: snippet,
+                  rawOuterHTML: img.rawOuterHTML || snippet,
+                  sourceMode: page.sourceMode,
+                  crawlTimestamp: page.crawledAt,
+                },
+              },
+            ],
           },
         });
       }
@@ -3984,6 +4081,18 @@ export function evaluateAllDiagnosticRules(
       cat === "indexability" && crawledPages.some((p) => p.indexabilityStatus === "unknown_manual_review");
     const isFullyEvaluated = cat !== "page_speed_assets" && !hasUnresolvedIndexability;
 
+    const evaluatedCheckNames: string[] = [];
+    const unEvaluatedCheckNames: string[] = [];
+    let partialEvaluationReason: string | undefined = undefined;
+    let missingIntegrations: string[] | undefined = undefined;
+
+    if (cat === "page_speed_assets") {
+      evaluatedCheckNames.push("Asset Compression & HTTP Transfer", "Image Dimensions & CLS Risk", "Above-the-Fold Lazy Loading");
+      unEvaluatedCheckNames.push("Lab Core Web Vitals (LCP/CLS/TBT)", "Field Real User Metrics (CrUX RUM)");
+      partialEvaluationReason = "3 / 5 checks evaluated. Field and Lab Core Web Vitals require optional PageSpeed Insights / CrUX API connection.";
+      missingIntegrations = ["Google PageSpeed Insights API", "Chrome UX Report (CrUX)"];
+    }
+
     return {
       category: cat,
       label: categoryLabels[cat],
@@ -3997,13 +4106,22 @@ export function evaluateAllDiagnosticRules(
       warningCount,
       opportunityCount,
       noticeCount,
+      partialEvaluationReason,
+      missingIntegrations,
+      evaluatedCheckNames: evaluatedCheckNames.length > 0 ? evaluatedCheckNames : undefined,
+      unEvaluatedCheckNames: unEvaluatedCheckNames.length > 0 ? unEvaluatedCheckNames : undefined,
     };
   });
 
   // Central Invariant Validation: fail loudly in development if any rule violates mathematical bounds
   validateIssueInvariants(issues, crawledPages);
 
-  // Compute Rule Execution Observability across all 101 diagnostic rules
+  // Attach Actionable Remediation Contracts to all issues
+  for (const issue of issues) {
+    issue.remediation = buildActionableRemediation(issue, crawledPages);
+  }
+
+  // Compute Rule Execution Observability across all 108 diagnostic rules
   const ruleExecutionObservability = computeRuleExecutionObservability(crawledPages, issues, sitemapOrphans);
 
   return {

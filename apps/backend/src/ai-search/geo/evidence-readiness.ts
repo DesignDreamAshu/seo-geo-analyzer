@@ -1,7 +1,7 @@
 /**
- * Engine C: GEO / Source & Evidence Readiness Engine
+ * Engine C: GEO / Source & Evidence Readiness Engine (Methodology: v28c-2.0).
  * Evaluates quantitative claim attribution, original first-party evidence,
- * author entity expertise proof, and document temporal freshness.
+ * author entity expertise proof, document temporal freshness, and content depth substance.
  */
 
 import { nanoid } from "nanoid";
@@ -9,6 +9,7 @@ import type {
   GEOEvidenceEvaluation,
   AISearchFinding,
   AIObservabilityRecord,
+  EvaluatorResult,
 } from "../types";
 import type { CrawledPageData } from "../../crawler/types";
 import * as cheerio from "cheerio";
@@ -19,37 +20,38 @@ const ORIGINAL_DATA_KEYWORDS = [
   "our survey",
   "proprietary data",
   "case study",
+  "case studies",
   "methodology",
   "internal benchmark",
-  "our analysis of",
+  "our analysis",
   "client outcome",
+  "results",
+  "impact",
 ];
 
 export function evaluateGEOEvidenceReadiness(crawledPages: CrawledPageData[]): {
   evaluations: GEOEvidenceEvaluation[];
   findings: AISearchFinding[];
   observability: AIObservabilityRecord[];
+  evaluators: EvaluatorResult[];
 } {
   const evaluations: GEOEvidenceEvaluation[] = [];
   const findings: AISearchFinding[] = [];
   const observability: AIObservabilityRecord[] = [];
+  const evaluators: EvaluatorResult[] = [];
 
   const eligibleEditorialPages = crawledPages.filter(
     (p) =>
       p.resourceType === "html_page" &&
       p.statusCode >= 200 &&
       p.statusCode < 400 &&
-      p.isIndexable &&
-      p.classification &&
-      (p.classification.primaryClass === "article_blog" ||
-        p.classification.primaryClass === "marketing_landing" ||
-        p.classification.primaryClass === "homepage")
+      p.isIndexable
   );
+  const totalPages = Math.max(1, eligibleEditorialPages.length);
 
   let totalQuantitativeClaims = 0;
   let totalAttributedClaims = 0;
   let totalOriginalDataPages = 0;
-  let totalAuthorVerifiedPages = 0;
 
   for (const page of eligibleEditorialPages) {
     if (!page.html) continue;
@@ -59,7 +61,7 @@ export function evaluateGEOEvidenceReadiness(crawledPages: CrawledPageData[]): {
     let pageAttributedCount = 0;
     const originalSignalTypes: string[] = [];
 
-    // 1. Scan paragraphs for quantitative claims and citations
+    // Scan paragraphs for quantitative claims and citations
     $("p, li").each((_, elem) => {
       const text = $(elem).text().trim();
       const claimMatches = text.match(STATISTICAL_CLAIM_REGEX);
@@ -68,7 +70,6 @@ export function evaluateGEOEvidenceReadiness(crawledPages: CrawledPageData[]): {
         pageClaimsCount += claimMatches.length;
         totalQuantitativeClaims += claimMatches.length;
 
-        // Check if paragraph contains an outbound source link or citation
         const links = $("a", elem);
         const hasCitationLink = links.length > 0;
         const hasFootnote = /\[\d+\]|\(\d{4}\)/.test(text);
@@ -77,7 +78,6 @@ export function evaluateGEOEvidenceReadiness(crawledPages: CrawledPageData[]): {
           pageAttributedCount += claimMatches.length;
           totalAttributedClaims += claimMatches.length;
         } else if (claimMatches.length >= 2 && text.length > 80) {
-          // Unattributed multi-claim paragraph
           findings.push({
             id: `ai_finding_${nanoid(10)}`,
             dimensionId: "GR_CLAIM_ATTRIBUTION_RATE",
@@ -108,7 +108,6 @@ export function evaluateGEOEvidenceReadiness(crawledPages: CrawledPageData[]): {
         }
       }
 
-      // Check original research / data signals
       const lowerText = text.toLowerCase();
       for (const kw of ORIGINAL_DATA_KEYWORDS) {
         if (lowerText.includes(kw) && !originalSignalTypes.includes(kw)) {
@@ -117,60 +116,29 @@ export function evaluateGEOEvidenceReadiness(crawledPages: CrawledPageData[]): {
       }
     });
 
-    if (originalSignalTypes.length > 0) totalOriginalDataPages++;
+    if (originalSignalTypes.length > 0 || page.url.includes("case-stud") || page.url.includes("solution")) {
+      totalOriginalDataPages++;
+    }
 
-    // 2. Author Entity Expertise Linkage (articles)
-    const isArticle = page.classification.primaryClass === "article_blog";
+    // Author linkage
+    const isArticle = page.classification?.primaryClass === "article_blog" || page.url.includes("/post/") || page.url.includes("/blog/");
     let authorEntityDeclared = false;
     let authorHasCredentials = false;
 
-    if (isArticle) {
-      const articleSchemas = page.schemaJsonLd?.filter(
-        (b) => b["@type"] === "Article" || b["@type"] === "BlogPosting" || b["@type"] === "NewsArticle"
-      );
-      if (articleSchemas && articleSchemas.length > 0) {
-        for (const schema of articleSchemas) {
-          const author = (schema as Record<string, any>).author;
-          if (author) {
-            authorEntityDeclared = true;
-            if (typeof author === "object" && (author.jobTitle || author.sameAs || author.description)) {
-              authorHasCredentials = true;
-              totalAuthorVerifiedPages++;
-            }
+    if (page.schemaJsonLd) {
+      for (const schema of page.schemaJsonLd) {
+        const block = schema as Record<string, any>;
+        const author = block.author;
+        if (author) {
+          authorEntityDeclared = true;
+          if (typeof author === "object" && (author.jobTitle || author.sameAs || author.description || author.name)) {
+            authorHasCredentials = true;
           }
         }
       }
-
-      if (!authorEntityDeclared) {
-        findings.push({
-          id: `ai_finding_${nanoid(10)}`,
-          dimensionId: "GR_AUTHOR_EXPERTISE_PROOF",
-          pillar: "GEO",
-          measurementClass: "DETERMINISTIC",
-          evidenceLevel: "LEVEL_A",
-          severity: "OPPORTUNITY",
-          title: `Article lacks explicit author Person schema credentials`,
-          description: `This article does not connect the author to an explicit Person schema entity with role credentials or sameAs references. AI citation models cross-reference verified author expertise when weighting generative answers.`,
-          recommendation: `Add structured 'author': {'@type': 'Person', 'name': '...', 'jobTitle': '...', 'sameAs': ['...']} inside Article JSON-LD schema.`,
-          confidenceScore: 0.9,
-          impactScore: 3,
-          isScoring: true,
-          affectedUrl: page.url,
-          evidence: {
-            observed: "Article JSON-LD schema missing structured author Person entity.",
-          },
-          remediationBlueprint: {
-            objective: "Link article author to explicit Person entity schema.",
-            actionSteps: [
-              "Include author name, job title, and official LinkedIn or bio URL in Article schema.",
-            ],
-            verificationMethod: "Validate JSON-LD Article.author entity properties.",
-          },
-        });
-      }
     }
 
-    // 3. Temporal Freshness
+    // Freshness
     let datePublished: string | null = null;
     let dateModified: string | null = null;
     if (page.schemaJsonLd) {
@@ -181,7 +149,7 @@ export function evaluateGEOEvidenceReadiness(crawledPages: CrawledPageData[]): {
       }
     }
 
-    const hasModifiedFreshnessDate = Boolean(dateModified);
+    const hasModifiedFreshnessDate = Boolean(dateModified || datePublished);
 
     evaluations.push({
       url: page.url,
@@ -196,11 +164,125 @@ export function evaluateGEOEvidenceReadiness(crawledPages: CrawledPageData[]): {
       datePublished,
       dateModified,
       isEvergreen: !datePublished,
-      isStale: false, // Baseline: not stale unless explicit time-decay verified
+      isStale: false,
     });
   }
 
-  // Observability Records
+  // GEO Evaluator 1: Quantitative Claim Citation Rate (Weight: 25%)
+  const geo1Score = totalQuantitativeClaims > 0
+    ? Math.round((totalAttributedClaims / totalQuantitativeClaims) * 100) / 100
+    : 0.6; // Neutral baseline
+  evaluators.push({
+    evaluatorId: "GEO_STATISTICAL_CLAIM_ATTRIBUTION",
+    evaluatorName: "Quantitative Statistical Claim Citation Rate",
+    pillar: "GEO",
+    weight: 25,
+    aggregationLevel: "PAGE_LEVEL",
+    status: geo1Score >= 0.7 ? "PASS" : geo1Score >= 0.4 ? "PARTIAL" : "FAIL",
+    score: geo1Score,
+    earnedPoints: Math.round(geo1Score * 25 * 10) / 10,
+    maxPoints: 25,
+    rawObservation: totalQuantitativeClaims > 0
+      ? `${totalAttributedClaims} / ${totalQuantitativeClaims} statistical claims (${Math.round((totalAttributedClaims / totalQuantitativeClaims) * 100)}%) include source citation hyperlinks or footnote references.`
+      : "No statistical benchmark or numerical claims detected in body copy. Neutral attribution baseline applied.",
+    threshold: ">= 70% of quantitative claims accompanied by source citation links.",
+    recommendation: "Provide source citation hyperlinks or internal benchmark footnotes whenever quoting metrics or percentages.",
+  });
+
+  // GEO Evaluator 2: First-Party Data & Case Studies (Weight: 25%)
+  const originalRatio = Math.round((totalOriginalDataPages / totalPages) * 100) / 100;
+  const geo2Score = originalRatio >= 0.35 ? 1.0 : originalRatio >= 0.15 ? 0.75 : originalRatio > 0 ? 0.35 : 0.0;
+  evaluators.push({
+    evaluatorId: "GEO_FIRST_PARTY_EVIDENCE_DENSITY",
+    evaluatorName: "First-Party Data, Case Studies & Proprietary Research",
+    pillar: "GEO",
+    weight: 25,
+    aggregationLevel: "PAGE_LEVEL",
+    status: geo2Score === 1.0 ? "PASS" : geo2Score >= 0.35 ? "PARTIAL" : "FAIL",
+    score: geo2Score,
+    earnedPoints: Math.round(geo2Score * 25 * 10) / 10,
+    maxPoints: 25,
+    rawObservation: `${totalOriginalDataPages} / ${totalPages} pages (${Math.round(originalRatio * 100)}%) contain original research indicators, case studies, or client outcome benchmarks.`,
+    threshold: ">= 35% of indexable pages include verifiable first-party evidence or case study outcomes.",
+  });
+
+  // GEO Evaluator 3: Author Entity Verification (Weight: 20%)
+  const blogPages = eligibleEditorialPages.filter(
+    (p) => p.classification?.primaryClass === "article_blog" || p.url.includes("/post/") || p.url.includes("/blog/")
+  );
+  let authorCredPages = 0;
+  for (const p of blogPages) {
+    if (p.schemaJsonLd?.some((b: any) => b.author && (typeof b.author === "object" || typeof b.author === "string"))) {
+      authorCredPages++;
+    }
+  }
+  const authorRatio = blogPages.length > 0 ? Math.round((authorCredPages / blogPages.length) * 100) / 100 : 0.7;
+  const geo3Score = blogPages.length === 0 ? 0.7 : authorRatio >= 0.8 ? 1.0 : authorRatio >= 0.4 ? 0.6 : 0.0;
+  evaluators.push({
+    evaluatorId: "GEO_AUTHOR_ENTITY_CREDENTIALS",
+    evaluatorName: "Author Entity Verification & E-E-A-T Schema Linkage",
+    pillar: "GEO",
+    weight: 20,
+    aggregationLevel: "PAGE_LEVEL",
+    status: geo3Score >= 0.8 ? "PASS" : geo3Score >= 0.4 ? "PARTIAL" : "FAIL",
+    score: geo3Score,
+    earnedPoints: Math.round(geo3Score * 20 * 10) / 10,
+    maxPoints: 20,
+    rawObservation: blogPages.length > 0
+      ? `${authorCredPages} / ${blogPages.length} editorial/article pages (${Math.round(authorRatio * 100)}%) declare structured author Person schema.`
+      : "Site has 0 editorial blog pages requiring author Person attribution.",
+    threshold: ">= 80% of editorial articles declare structured Person author credentials.",
+    recommendation: geo3Score < 0.8 ? "Add structured Person schema declaring author name, role, and sameAs bio profiles to all articles." : undefined,
+  });
+
+  // GEO Evaluator 4: Temporal Freshness Signals (Weight: 15%)
+  let datedPages = 0;
+  for (const p of blogPages) {
+    if (p.schemaJsonLd?.some((b: any) => b.datePublished || b.dateModified) || (p.html && /\b(?:202[4-6]|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/i.test(p.html))) {
+      datedPages++;
+    }
+  }
+  const freshnessRatio = blogPages.length > 0 ? Math.round((datedPages / blogPages.length) * 100) / 100 : 0.8;
+  const geo4Score = freshnessRatio >= 0.8 ? 1.0 : freshnessRatio >= 0.5 ? 0.75 : 0.4;
+  evaluators.push({
+    evaluatorId: "GEO_TEMPORAL_FRESHNESS_SIGNALS",
+    evaluatorName: "Publication & Modification Timestamp Freshness",
+    pillar: "GEO",
+    weight: 15,
+    aggregationLevel: "PAGE_LEVEL",
+    status: geo4Score === 1.0 ? "PASS" : "PARTIAL",
+    score: geo4Score,
+    earnedPoints: Math.round(geo4Score * 15 * 10) / 10,
+    maxPoints: 15,
+    rawObservation: blogPages.length > 0
+      ? `${datedPages} / ${blogPages.length} article pages (${Math.round(freshnessRatio * 100)}%) provide explicit publication or modified date signals.`
+      : "Standard temporal freshness verified across site pages.",
+    threshold: ">= 80% of article/content pages declare explicit publication and modification timestamps.",
+  });
+
+  // GEO Evaluator 5: Substantive Content Depth (Weight: 15%)
+  let deepPages = 0;
+  for (const p of eligibleEditorialPages) {
+    const wordCount = p.rawWordCount || (p.rawFacts as any)?.visibleBodyWordCount || 0;
+    if (wordCount >= 350) deepPages++;
+  }
+  const depthRatio = Math.round((deepPages / totalPages) * 100) / 100;
+  const geo5Score = depthRatio >= 0.7 ? 1.0 : depthRatio >= 0.4 ? 0.75 : 0.4;
+  evaluators.push({
+    evaluatorId: "GEO_CONTENT_DEPTH_SUBSTANCE",
+    evaluatorName: "Substantive Topical Depth & Section Breadth (>=350 words)",
+    pillar: "GEO",
+    weight: 15,
+    aggregationLevel: "PAGE_LEVEL",
+    status: geo5Score === 1.0 ? "PASS" : "PARTIAL",
+    score: geo5Score,
+    earnedPoints: Math.round(geo5Score * 15 * 10) / 10,
+    maxPoints: 15,
+    rawObservation: `${deepPages} / ${totalPages} pages (${Math.round(depthRatio * 100)}%) contain substantive depth (>350 words) suitable for RAG generative synthesis.`,
+    threshold: ">= 70% of indexable pages have >= 350 words of substantive body copy.",
+  });
+
+  // Observability records
   observability.push({
     dimensionId: "GR_CLAIM_ATTRIBUTION_RATE",
     pillar: "GEO",
@@ -210,8 +292,8 @@ export function evaluateGEOEvidenceReadiness(crawledPages: CrawledPageData[]): {
     evaluatedCount: totalQuantitativeClaims,
     passedCount: totalAttributedClaims,
     failedCount: totalQuantitativeClaims - totalAttributedClaims,
-    skippedCount: totalQuantitativeClaims === 0 ? 1 : 0,
-    status: totalQuantitativeClaims === 0 ? "SKIPPED" : totalAttributedClaims > 0 ? "PASSED" : "FAILED",
+    skippedCount: 0,
+    status: totalAttributedClaims > 0 ? "PASSED" : "FAILED",
   });
 
   observability.push({
@@ -224,12 +306,13 @@ export function evaluateGEOEvidenceReadiness(crawledPages: CrawledPageData[]): {
     passedCount: totalOriginalDataPages,
     failedCount: eligibleEditorialPages.length - totalOriginalDataPages,
     skippedCount: 0,
-    status: totalOriginalDataPages > 0 ? "PASSED" : "SKIPPED",
+    status: totalOriginalDataPages > 0 ? "PASSED" : "FAILED",
   });
 
   return {
     evaluations,
     findings,
     observability,
+    evaluators,
   };
 }

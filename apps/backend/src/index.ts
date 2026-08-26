@@ -6,6 +6,7 @@ import { nanoid } from "nanoid";
 import { generatePdf } from "html-pdf-node";
 import { ReportGenerator } from "lighthouse/report/generator/report-generator.js";
 import { analyzeSite, AnalysisTimeoutError, calculateWeightedScore } from "./analysis";
+import { reconstructModulesFromCrawlResult } from "./analysis/reconstruct-modules";
 import { runSiteAuditCrawl } from "./crawler/engine";
 import { fetchPageHtml, checkBrowserCapability } from "./crawler/fetcher";
 import { processPageAuthoritatively } from "./crawler/page-processor";
@@ -38,11 +39,29 @@ import {
   globalAIVisibilityTrendEngine,
   globalAISourceIntelligenceEngine,
   globalAIOptimizationEngine,
+  globalAIMeasurementEngine,
+  globalAIMeasurementComparator,
+  globalAICompetitiveEngine,
+  globalCompetitorCrawler,
+  normalizeCompetitorDomain,
+  validateCompetitorAddition,
   AIOptimizationVerifier,
 } from "./ai-search/engine";
 import { SqliteAnalyticsRepository } from "./ai-search/analytics/persistence/sqlite-analytics-repo";
 import { SqliteCitationRepository } from "./ai-search/citations/persistence/sqlite-citation-repo";
 import { SqliteOptimizationRepository } from "./ai-search/optimization/persistence/sqlite-optimization-repo";
+import { SqliteMeasurementRepository } from "./ai-search/measurement/persistence/sqlite-measurement-repo";
+import { SqliteCompetitiveRepository } from "./ai-search/competitive/persistence/sqlite-competitive-repo";
+import {
+  globalRemediationWorkflowEngine,
+  SqliteWorkflowRepository,
+} from "./workflow";
+import {
+  globalClientReportEngine,
+  SqliteClientReportRepository,
+  ClientPdfGenerator,
+  RemediationCsvExporter,
+} from "./reporting";
 import type { ExportPayload, ModuleSnapshot } from "./types";
 
 const PSI_URL = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
@@ -750,6 +769,8 @@ app.get("/api/audits/:auditRunId", async (req, res) => {
       };
     }
 
+    const modules = reconstructModulesFromCrawlResult(siteAudit);
+
     return res.json({
       ok: true,
       project,
@@ -760,6 +781,7 @@ app.get("/api/audits/:auditRunId", async (req, res) => {
       comparisonWithPrevious,
       historicalReportMarkdown,
       siteAudit,
+      modules,
     });
   } catch (err) {
     return res.status(500).json({ error: (err as Error).message });
@@ -791,6 +813,8 @@ app.get("/api/projects/:projectId/latest-audit", async (req, res) => {
       } catch {}
     }
 
+    const modules = reconstructModulesFromCrawlResult(siteAudit);
+
     return res.json({
       ok: true,
       project,
@@ -800,6 +824,7 @@ app.get("/api/projects/:projectId/latest-audit", async (req, res) => {
       metrics,
       comparisonWithPrevious,
       siteAudit,
+      modules,
     });
   } catch (err) {
     return res.status(500).json({ error: (err as Error).message });
@@ -2145,6 +2170,675 @@ app.post("/api/projects/:projectId/ai-search/optimization/update-status", async 
 
     optimizationRepo.updateFindingLifecycle(findingId, status);
     return res.json({ ok: true, findingId, status });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ============================================================================
+// PHASE 28I: AI MEASUREMENT & BENCHMARKING ENDPOINTS
+// ============================================================================
+const measurementRepo = new SqliteMeasurementRepository(persistence.db);
+
+// 23. Get Latest Measurement Snapshot
+app.get("/api/projects/:projectId/ai-search/measurement/latest", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    let snapshot = measurementRepo.getLatestMeasurementSnapshot(project.projectId);
+    if (!snapshot) {
+      // Auto-generate initial measurement snapshot from latest audit & optimization snapshot
+      let optSnapshot = optimizationRepo.getLatestSnapshot(project.projectId);
+      const runs = globalAIObservationEngine.getObservationRuns(project.projectId, 1);
+      const latestRun = runs[0];
+      const observations = latestRun ? globalAIObservationEngine.getObservationsForRun(latestRun.runId) : [];
+
+      const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(project.projectId);
+      const auditSnapshot = latestAudit ? await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId) : null;
+      const payload = auditSnapshot ? JSON.parse(auditSnapshot.payloadJson) : null;
+      const crawledPages = payload?.crawlResult?.crawledPages || [];
+
+      const { profile, promptUniverse } = generateProjectKnowledgeAndPromptUniverse(
+        project.projectId,
+        project.normalizedDomain,
+        crawledPages
+      );
+
+      const pageContexts = crawledPages.map((p: any) => ({
+        url: p.pageUrl || p.url,
+        title: p.rawFacts?.title || p.title,
+        metaDescription: p.rawFacts?.metaDescription || p.metaDescription,
+        h1Texts: p.rawFacts?.h1Texts || (p.rawFacts?.h1Count > 0 ? [p.rawFacts?.title] : []),
+        headings: p.headingsOutline?.map((h: any) => h.text) || [],
+        visibleText: p.rawFacts?.visibleTextSample || p.text || "",
+        schemaTypes: p.jsonLdBlocks?.flatMap((j: any) => j.types || []) || [],
+      }));
+
+      if (!optSnapshot) {
+        optSnapshot = globalAIOptimizationEngine.computeOptimizationSnapshot(
+          project.projectId,
+          latestRun?.runId || "run_init",
+          profile,
+          promptUniverse,
+          observations,
+          pageContexts
+        );
+        optimizationRepo.saveSnapshot(optSnapshot);
+      }
+
+      snapshot = globalAIMeasurementEngine.computeMeasurementSnapshot(
+        project.projectId,
+        latestAudit?.auditRunId || "audit_init",
+        optSnapshot,
+        profile,
+        promptUniverse,
+        pageContexts,
+        observations,
+        optSnapshot.findings
+      );
+
+      measurementRepo.saveMeasurementSnapshot(snapshot);
+    }
+
+    return res.json({ ok: true, snapshot });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 24. Generate Fresh Measurement Snapshot
+app.post("/api/projects/:projectId/ai-search/measurement/generate", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const runs = globalAIObservationEngine.getObservationRuns(project.projectId, 1);
+    const latestRun = runs[0];
+    const observations = latestRun ? globalAIObservationEngine.getObservationsForRun(latestRun.runId) : [];
+
+    const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(project.projectId);
+    const auditSnapshot = latestAudit ? await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId) : null;
+    const payload = auditSnapshot ? JSON.parse(auditSnapshot.payloadJson) : null;
+    const crawledPages = payload?.crawlResult?.crawledPages || [];
+
+    const { profile, promptUniverse } = generateProjectKnowledgeAndPromptUniverse(
+      project.projectId,
+      project.normalizedDomain,
+      crawledPages
+    );
+
+    const pageContexts = crawledPages.map((p: any) => ({
+      url: p.pageUrl || p.url,
+      title: p.rawFacts?.title || p.title,
+      metaDescription: p.rawFacts?.metaDescription || p.metaDescription,
+      h1Texts: p.rawFacts?.h1Texts || (p.rawFacts?.h1Count > 0 ? [p.rawFacts?.title] : []),
+      headings: p.headingsOutline?.map((h: any) => h.text) || [],
+      visibleText: p.rawFacts?.visibleTextSample || p.text || "",
+      schemaTypes: p.jsonLdBlocks?.flatMap((j: any) => j.types || []) || [],
+    }));
+
+    let optSnapshot = optimizationRepo.getLatestSnapshot(project.projectId);
+    if (!optSnapshot) {
+      optSnapshot = globalAIOptimizationEngine.computeOptimizationSnapshot(
+        project.projectId,
+        latestRun?.runId || "run_init",
+        profile,
+        promptUniverse,
+        observations,
+        pageContexts
+      );
+      optimizationRepo.saveSnapshot(optSnapshot);
+    }
+
+    const snapshot = globalAIMeasurementEngine.computeMeasurementSnapshot(
+      project.projectId,
+      latestAudit?.auditRunId || "audit_init",
+      optSnapshot,
+      profile,
+      promptUniverse,
+      pageContexts,
+      observations,
+      optSnapshot.findings
+    );
+
+    measurementRepo.saveMeasurementSnapshot(snapshot);
+    return res.json({ ok: true, snapshot });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 25. Get Measurement History
+app.get("/api/projects/:projectId/ai-search/measurement/history", async (req, res) => {
+  try {
+    const history = measurementRepo.getMeasurementHistory(req.params.projectId, 20);
+    return res.json({ ok: true, history });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 26. Compare Measurement Snapshots
+app.get("/api/projects/:projectId/ai-search/measurement/compare", async (req, res) => {
+  try {
+    const { baselineId, currentId } = req.query;
+    const history = measurementRepo.getMeasurementHistory(req.params.projectId, 20);
+
+    if (history.length < 2 && (!baselineId || !currentId)) {
+      return res.json({ ok: true, comparison: null, note: "Need at least 2 snapshots to compute comparison." });
+    }
+
+    const currentSnapshot = currentId
+      ? history.find((h) => h.measurementId === currentId) || history[0]
+      : history[0];
+
+    const baselineSnapshot = baselineId
+      ? history.find((h) => h.measurementId === baselineId) || history[1]
+      : history[1];
+
+    if (!currentSnapshot || !baselineSnapshot) {
+      return res.status(404).json({ error: "Could not resolve comparison snapshots." });
+    }
+
+    const comparison = globalAIMeasurementComparator.compareSnapshots(baselineSnapshot, currentSnapshot);
+    measurementRepo.saveComparison(comparison);
+
+    return res.json({ ok: true, comparison });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ============================================================================
+// PHASE 28J: COMPETITOR AI INTELLIGENCE & BENCHMARKING ENDPOINTS
+// ============================================================================
+const competitiveRepo = new SqliteCompetitiveRepository(persistence.db);
+
+// 27. List Project Competitors
+app.get("/api/projects/:projectId/ai-search/competitors", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const competitors = competitiveRepo.getCompetitors(project.projectId);
+    return res.json({ ok: true, competitors });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 28. Add Project Competitor
+app.post("/api/projects/:projectId/ai-search/competitors", async (req, res) => {
+  try {
+    const { domain, displayName } = req.body;
+    if (!domain) return res.status(400).json({ error: "Missing competitor domain" });
+
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const existingCompetitors = competitiveRepo.getCompetitors(project.projectId);
+    const normalizedDomain = normalizeCompetitorDomain(domain);
+
+    validateCompetitorAddition(
+      project.normalizedDomain,
+      normalizedDomain,
+      existingCompetitors.map((c) => c.domain)
+    );
+
+    const newCompetitor = {
+      competitorId: `comp_${nanoid(10)}`,
+      projectId: project.projectId,
+      domain: normalizedDomain,
+      displayName: displayName || normalizedDomain,
+      status: "ACTIVE" as const,
+      source: "USER_CONFIGURED" as const,
+      confidence: 1.0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    competitiveRepo.addCompetitor(newCompetitor);
+    return res.json({ ok: true, competitor: newCompetitor });
+  } catch (err) {
+    return res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+// 29. Update Competitor Status
+app.patch("/api/projects/:projectId/ai-search/competitors/:competitorId", async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (!status || !["ACTIVE", "INACTIVE", "ARCHIVED"].includes(status)) {
+      return res.status(400).json({ error: "Invalid competitor status" });
+    }
+
+    competitiveRepo.updateCompetitorStatus(req.params.competitorId, status);
+    return res.json({ ok: true, competitorId: req.params.competitorId, status });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 30. Delete Competitor
+app.delete("/api/projects/:projectId/ai-search/competitors/:competitorId", async (req, res) => {
+  try {
+    competitiveRepo.deleteCompetitor(req.params.competitorId);
+    return res.json({ ok: true, deletedCompetitorId: req.params.competitorId });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 31. Get Latest Competitive Benchmark Snapshot
+app.get("/api/projects/:projectId/ai-search/competitive/latest", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const snapshot = competitiveRepo.getLatestBenchmarkSnapshot(project.projectId);
+    const competitors = competitiveRepo.getCompetitors(project.projectId);
+
+    return res.json({ ok: true, snapshot, competitors });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 32. Generate Competitive Benchmark Snapshot
+app.post("/api/projects/:projectId/ai-search/competitive/generate", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const competitors = competitiveRepo.getCompetitors(project.projectId);
+    const activeCompetitors = competitors.filter((c) => c.status === "ACTIVE");
+
+    const clientMeasurementSnapshot = measurementRepo.getLatestMeasurementSnapshot(project.projectId);
+    if (!clientMeasurementSnapshot) {
+      return res.status(400).json({ error: "No client measurement baseline snapshot found. Generate client measurement first." });
+    }
+
+    const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(project.projectId);
+    const auditSnapshot = latestAudit ? await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId) : null;
+    const payload = auditSnapshot ? JSON.parse(auditSnapshot.payloadJson) : null;
+    const crawledPages = payload?.crawlResult?.crawledPages || [];
+
+    const { profile: clientProfile, promptUniverse } = generateProjectKnowledgeAndPromptUniverse(
+      project.projectId,
+      project.normalizedDomain,
+      crawledPages
+    );
+
+    const clientPageContexts = crawledPages.map((p: any) => ({
+      url: p.pageUrl || p.url,
+      title: p.rawFacts?.title || p.title,
+      metaDescription: p.rawFacts?.metaDescription || p.metaDescription,
+      h1Texts: p.rawFacts?.h1Texts || (p.rawFacts?.h1Count > 0 ? [p.rawFacts?.title] : []),
+      headings: p.headingsOutline?.map((h: any) => h.text) || [],
+      visibleText: p.rawFacts?.visibleTextSample || p.text || "",
+      schemaTypes: p.jsonLdBlocks?.flatMap((j: any) => j.types || []) || [],
+    }));
+
+    // Build competitor contexts via real competitor crawler
+    const competitorContexts = await Promise.all(
+      activeCompetitors.map((comp) => globalCompetitorCrawler.crawlCompetitor(comp, { maxPages: 25 }))
+    );
+
+    const snapshot = globalAICompetitiveEngine.generateCompetitiveBenchmark(
+      project.projectId,
+      clientMeasurementSnapshot,
+      clientProfile,
+      promptUniverse,
+      clientPageContexts,
+      competitorContexts,
+      []
+    );
+
+    competitiveRepo.saveBenchmarkSnapshot(snapshot);
+    return res.json({ ok: true, snapshot });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ============================================================================
+// PHASE 28K: REMEDIATION WORKFLOW & CLIENT REPORTING ENDPOINTS
+// ============================================================================
+const workflowRepo = new SqliteWorkflowRepository(persistence.db);
+const clientReportRepo = new SqliteClientReportRepository(persistence.db);
+
+// 33. List Workflow Action Items
+app.get("/api/projects/:projectId/workflow/action-items", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    let items = workflowRepo.getActionItems(project.projectId);
+
+    // Auto-reconcile if empty and full audit exists
+    if (items.length === 0) {
+      const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(project.projectId);
+      if (latestAudit) {
+        const auditSnapshot = await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId);
+        if (auditSnapshot) {
+          const payload = JSON.parse(auditSnapshot.payloadJson);
+          items = globalRemediationWorkflowEngine.generateActionItemsFromAudit(
+            project.projectId,
+            latestAudit.auditRunId,
+            payload.crawlResult || payload,
+            []
+          );
+          workflowRepo.saveActionItems(items);
+        }
+      }
+    }
+
+    const { status, priority, category, sourceType, assignee, isBlocked, search } = req.query;
+    const filtered = globalRemediationWorkflowEngine.filterActionItems(items, {
+      status: status as any,
+      priority: priority as any,
+      category: category as string,
+      sourceType: sourceType as any,
+      assignee: assignee as string,
+      isBlocked: isBlocked !== undefined ? isBlocked === "true" : undefined,
+      searchQuery: search as string,
+    });
+
+    const summary = globalRemediationWorkflowEngine.computeQueueSummary(project.projectId, items);
+    return res.json({ ok: true, actionItems: filtered, summary });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 34. Get Action Item Detail
+app.get("/api/projects/:projectId/workflow/action-items/:actionItemId", async (req, res) => {
+  try {
+    const item = workflowRepo.getActionItemById(req.params.actionItemId);
+    if (!item) return res.status(404).json({ error: "Action item not found" });
+
+    return res.json({ ok: true, actionItem: item });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 35. Reconcile Workflow State
+app.post("/api/projects/:projectId/workflow/reconcile", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    let existingItems = workflowRepo.getActionItems(project.projectId);
+    const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(project.projectId);
+
+    if (latestAudit) {
+      const auditSnapshot = await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId);
+      if (auditSnapshot) {
+        const payload = JSON.parse(auditSnapshot.payloadJson);
+        existingItems = globalRemediationWorkflowEngine.generateActionItemsFromAudit(
+          project.projectId,
+          latestAudit.auditRunId,
+          payload.crawlResult || payload,
+          existingItems
+        );
+      }
+    }
+
+    // Reconcile AI snapshot if available
+    const optSnapshot = optimizationRepo.getLatestSnapshot(project.projectId);
+    if (optSnapshot) {
+      existingItems = globalRemediationWorkflowEngine.generateActionItemsFromAIOptimization(
+        project.projectId,
+        optSnapshot,
+        existingItems
+      );
+    }
+
+    // Reconcile Competitive snapshot if available
+    const compSnapshot = competitiveRepo.getLatestBenchmarkSnapshot(project.projectId);
+    if (compSnapshot) {
+      existingItems = globalRemediationWorkflowEngine.generateActionItemsFromCompetitiveBenchmark(
+        project.projectId,
+        compSnapshot,
+        existingItems
+      );
+    }
+
+    workflowRepo.saveActionItems(existingItems);
+    const summary = globalRemediationWorkflowEngine.computeQueueSummary(project.projectId, existingItems);
+    return res.json({ ok: true, actionItems: existingItems, summary });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 36. Update Status
+app.patch("/api/projects/:projectId/workflow/action-items/:actionItemId/status", async (req, res) => {
+  try {
+    const { status, details } = req.body;
+    if (!status) return res.status(400).json({ error: "Missing status" });
+
+    const item = workflowRepo.getActionItemById(req.params.actionItemId);
+    if (!item) return res.status(404).json({ error: "Action item not found" });
+
+    const updated = globalRemediationWorkflowEngine.updateItemStatus(item, status, "USER", details);
+    workflowRepo.saveActionItem(updated);
+
+    return res.json({ ok: true, actionItem: updated });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 37. Assign Action Item
+app.patch("/api/projects/:projectId/workflow/action-items/:actionItemId/assign", async (req, res) => {
+  try {
+    const { assigneeName } = req.body;
+    const item = workflowRepo.getActionItemById(req.params.actionItemId);
+    if (!item) return res.status(404).json({ error: "Action item not found" });
+
+    const updated = globalRemediationWorkflowEngine.assignItem(item, assigneeName || null, "USER");
+    workflowRepo.saveActionItem(updated);
+
+    return res.json({ ok: true, actionItem: updated });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 38. Set Due Date
+app.patch("/api/projects/:projectId/workflow/action-items/:actionItemId/due-date", async (req, res) => {
+  try {
+    const { dueDate } = req.body;
+    const item = workflowRepo.getActionItemById(req.params.actionItemId);
+    if (!item) return res.status(404).json({ error: "Action item not found" });
+
+    const updated = globalRemediationWorkflowEngine.setDueDate(item, dueDate || null, "USER");
+    workflowRepo.saveActionItem(updated);
+
+    return res.json({ ok: true, actionItem: updated });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 39. Set Priority Override
+app.patch("/api/projects/:projectId/workflow/action-items/:actionItemId/priority", async (req, res) => {
+  try {
+    const { userPriority } = req.body;
+    const item = workflowRepo.getActionItemById(req.params.actionItemId);
+    if (!item) return res.status(404).json({ error: "Action item not found" });
+
+    const updated = globalRemediationWorkflowEngine.setPriorityOverride(item, userPriority || null, "USER");
+    workflowRepo.saveActionItem(updated);
+
+    return res.json({ ok: true, actionItem: updated });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 40. Add Note
+app.post("/api/projects/:projectId/workflow/action-items/:actionItemId/notes", async (req, res) => {
+  try {
+    const { text, author } = req.body;
+    if (!text) return res.status(400).json({ error: "Missing note text" });
+
+    const item = workflowRepo.getActionItemById(req.params.actionItemId);
+    if (!item) return res.status(404).json({ error: "Action item not found" });
+
+    const updated = globalRemediationWorkflowEngine.addNote(item, author || "Team Member", text);
+    workflowRepo.saveActionItem(updated);
+
+    return res.json({ ok: true, actionItem: updated });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 41. Set / Clear Blocker
+app.patch("/api/projects/:projectId/workflow/action-items/:actionItemId/blocker", async (req, res) => {
+  try {
+    const { blockerReason, blockerDetail } = req.body;
+    const item = workflowRepo.getActionItemById(req.params.actionItemId);
+    if (!item) return res.status(404).json({ error: "Action item not found" });
+
+    const updated = globalRemediationWorkflowEngine.setBlocker(item, blockerReason || null, blockerDetail || null, "USER");
+    workflowRepo.saveActionItem(updated);
+
+    return res.json({ ok: true, actionItem: updated });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 42. Live Verify Action Item
+app.post("/api/projects/:projectId/workflow/action-items/:actionItemId/verify", async (req, res) => {
+  try {
+    const item = workflowRepo.getActionItemById(req.params.actionItemId);
+    if (!item) return res.status(404).json({ error: "Action item not found" });
+
+    const updated = await globalRemediationWorkflowEngine.verifyActionItem(item);
+    workflowRepo.saveActionItem(updated);
+
+    return res.json({ ok: true, actionItem: updated });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 43. Get Workflow Queue Summary
+app.get("/api/projects/:projectId/workflow/summary", async (req, res) => {
+  try {
+    const items = workflowRepo.getActionItems(req.params.projectId);
+    const summary = globalRemediationWorkflowEngine.computeQueueSummary(req.params.projectId, items);
+    return res.json({ ok: true, summary });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 44. Export Remediation CSV
+app.get("/api/projects/:projectId/workflow/export/csv", async (req, res) => {
+  try {
+    const items = workflowRepo.getActionItems(req.params.projectId);
+    const csvContent = RemediationCsvExporter.exportActionItemsToCsv(items);
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="remediation-queue-${req.params.projectId}.csv"`);
+    return res.send(csvContent);
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 45. Generate Client Report Snapshot
+app.post("/api/projects/:projectId/reports/generate", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(project.projectId);
+    if (!latestAudit) return res.status(400).json({ error: "No audit snapshot found for project." });
+
+    const auditSnapshot = await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId);
+    const currentAuditPayload = auditSnapshot ? JSON.parse(auditSnapshot.payloadJson) : null;
+
+    // Previous audit if requested or available
+    const auditHistory = await persistence.auditRuns.listAuditRunsForProject(project.projectId);
+    const prevAuditRun = auditHistory.length > 1 ? auditHistory[1] : null;
+    let previousAuditPayload = null;
+    if (prevAuditRun) {
+      const prevSnap = await persistence.auditSnapshots.getSnapshot(prevAuditRun.auditRunId);
+      previousAuditPayload = prevSnap ? JSON.parse(prevSnap.payloadJson) : null;
+    }
+
+    const actionItems = workflowRepo.getActionItems(project.projectId);
+    const aiMeasurementSnapshot = measurementRepo.getLatestMeasurementSnapshot(project.projectId);
+    const compSnapshot = competitiveRepo.getLatestBenchmarkSnapshot(project.projectId);
+
+    const report = globalClientReportEngine.generateClientReport(
+      project.projectId,
+      project.primaryDomain || "BOT Consulting",
+      project.normalizedDomain || "botconsulting.io",
+      currentAuditPayload,
+      previousAuditPayload,
+      actionItems,
+      aiMeasurementSnapshot,
+      compSnapshot,
+      req.body || {}
+    );
+
+    clientReportRepo.saveReportSnapshot(report);
+    return res.json({ ok: true, report });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 46. Get Latest Client Report Snapshot
+app.get("/api/projects/:projectId/reports/latest", async (req, res) => {
+  try {
+    const report = clientReportRepo.getLatestReportSnapshot(req.params.projectId);
+    return res.json({ ok: true, report });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 47. List Report History
+app.get("/api/projects/:projectId/reports/history", async (req, res) => {
+  try {
+    const history = clientReportRepo.listReportHistory(req.params.projectId);
+    return res.json({ ok: true, history });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 48. Get Report Snapshot by ID
+app.get("/api/projects/:projectId/reports/:reportId", async (req, res) => {
+  try {
+    const report = clientReportRepo.getReportSnapshotById(req.params.reportId);
+    if (!report) return res.status(404).json({ error: "Report snapshot not found" });
+
+    return res.json({ ok: true, report });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 49. Export Report to HTML / PDF
+app.get("/api/projects/:projectId/reports/:reportId/export/pdf", async (req, res) => {
+  try {
+    const report = clientReportRepo.getReportSnapshotById(req.params.reportId);
+    if (!report) return res.status(404).json({ error: "Report snapshot not found" });
+
+    const html = ClientPdfGenerator.generateReportHtml(report);
+    res.setHeader("Content-Type", "text/html");
+    return res.send(html);
   } catch (err) {
     return res.status(500).json({ error: (err as Error).message });
   }

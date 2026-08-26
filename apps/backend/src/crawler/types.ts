@@ -69,7 +69,7 @@ export type RenderMode =
   | "raw_plus_schema"
   | "manual_review";
 
-export type RenderConfidence = "high" | "medium" | "low" | "manual_review";
+export type RenderConfidence = "high" | "medium" | "low" | "manual_review" | "unreliable" | "HIGH" | "MEDIUM" | "LOW" | "CONFIRMED";
 
 export type Soft404Status =
   | "valid_page"
@@ -276,6 +276,7 @@ export interface ExternalLinkTelemetry {
 export interface ImageAsset {
   src: string;
   resolvedUrl?: string;
+  imageFilename?: string;
   alt: string | null;
   altText?: string | null;
   altState: ImageAltState;
@@ -284,13 +285,40 @@ export interface ImageAsset {
   isLinked: boolean;
   accessibleContext?: string | null;
   srcset?: string | null;
+  sizes?: string | null;
   width?: number | null;
   height?: number | null;
+  widthAttribute?: string | number | null;
+  heightAttribute?: string | number | null;
+  computedWidth?: number | null;
+  computedHeight?: number | null;
+  cssAspectRatio?: string | null;
+  naturalWidth?: number | null;
+  naturalHeight?: number | null;
   hasDimensions?: boolean;
   loading?: string | null;
+  fetchpriority?: string | null;
   format?: string | null;
   byteSize?: number | null;
   isBroken?: boolean;
+  // DOM Hierarchy & Containers
+  domSelector?: string;
+  selectorConfidence?: "confirmed" | "likely" | "fragile" | "unavailable";
+  elementTag?: string;
+  elementId?: string | null;
+  elementClasses?: string[];
+  parentTag?: string | null;
+  parentId?: string | null;
+  parentClasses?: string[];
+  nearestStableContainerSelector?: string | null;
+  nearestStableContainerClasses?: string[];
+  whetherInsideRichText?: boolean;
+  richTextContainerSelector?: string | null;
+  whetherInsideArticle?: boolean;
+  renderedOuterHTML?: string | null;
+  rawOuterHTML?: string | null;
+  sourceMode?: string;
+  crawlTimestamp?: string;
 }
 
 export interface ResourceAsset {
@@ -766,6 +794,7 @@ export interface CrawledPageData {
   unminifiedResources?: Array<{ url: string; type: "css" | "js"; byteSize: number }>;
 }
 
+
 export interface DiagnosticEvidence {
   observed: string;
   crawlTimestamp: string;
@@ -777,10 +806,14 @@ export interface DiagnosticEvidence {
   codeSnippet?: string | null;
   factSource?: "raw_http" | "rendered_playwright" | "mixed" | "manual_review";
   authoritativeFactSource?: "raw" | "rendered";
+  authorityReason?: string;
   renderReason?: string;
   renderConfidence?: RenderConfidence;
   componentClassification?: "global_template" | "page_primary" | "unknown";
   occurrences?: StructuredOccurrence[];
+  imageSrc?: string;
+  src?: string;
+  [key: string]: any;
 }
 
 export interface DiagnosticIssue {
@@ -816,9 +849,19 @@ export interface DiagnosticIssue {
   }>;
   isSystemicTemplateIssue?: boolean;
   templateFingerprint?: string;
-  componentGuess?: "navbar" | "footer" | "blog_template" | "job_template" | "unknown_shared_component";
+  componentGuess?:
+    | "navbar"
+    | "footer"
+    | "blog_template"
+    | "job_template"
+    | "shared_component_high_confidence"
+    | "cms_template_high_confidence"
+    | "global_asset_high_confidence"
+    | "manual_component_identification_required"
+    | "unknown_shared_component";
   duplicateValue?: string;
   groupId?: string;
+  remediation?: any;
 }
 
 export interface ScoreDeduction {
@@ -896,6 +939,10 @@ export interface CategoryScoreSummary {
   warningCount: number;
   opportunityCount: number;
   noticeCount: number;
+  partialEvaluationReason?: string;
+  missingIntegrations?: string[];
+  evaluatedCheckNames?: string[];
+  unEvaluatedCheckNames?: string[];
 }
 
 export interface CrawlAuditResult {

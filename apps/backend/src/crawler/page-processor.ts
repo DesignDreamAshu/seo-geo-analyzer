@@ -8,6 +8,7 @@ import type {
   ImageAsset,
   LandmarkFacts,
   RawPageFacts,
+  RenderConfidence,
   RenderDecision,
   RenderedPageFacts,
 } from "./types";
@@ -401,10 +402,76 @@ export async function processPageAuthoritatively(
               const height = heightAttr ? parseInt(heightAttr, 10) : (img.naturalHeight > 0 ? img.naturalHeight : null);
               const hasDimensions = Boolean(img.hasAttribute("width") && img.hasAttribute("height")) || Boolean(width && height);
 
+              const rect = img.getBoundingClientRect();
+              const computedStyle = window.getComputedStyle(img);
+              const computedWidth = Math.round(rect.width) || null;
+              const computedHeight = Math.round(rect.height) || null;
+              const cssAspectRatio = computedStyle.aspectRatio !== "auto" ? computedStyle.aspectRatio : null;
+
+              const src = img.src || img.getAttribute("src") || "";
+              const imageFilename = src.split("/").pop()?.split("?")[0] || "image";
+
+              // DOM Hierarchy & Containers
+              const elId = img.id || null;
+              const elClasses = Array.from(img.classList);
+              const parent = img.parentElement;
+              const parentTag = parent ? parent.tagName.toLowerCase() : null;
+              const parentId = parent ? parent.id || null : null;
+              const parentClasses = parent ? Array.from(parent.classList) : [];
+
+              const richTextParent = img.closest(".w-richtext, .blog_body_rich_text, .blog-content, [class*='rich-text'], [class*='richtext']");
+              const whetherInsideRichText = Boolean(richTextParent);
+              let richTextContainerSelector: string | null = null;
+              if (whetherInsideRichText && richTextParent) {
+                const rtClass = richTextParent.classList[0];
+                richTextContainerSelector = rtClass ? `.${rtClass}` : ".w-richtext";
+              }
+
+              const articleParent = img.closest("article, [role='article']");
+              const whetherInsideArticle = Boolean(articleParent);
+
+              const cardParent = img.closest(".w-dyn-item, .blog-card, .case-study-card, .solution-card, [class*='card']");
+              let nearestStableContainerSelector: string | null = null;
+              let nearestStableContainerClasses: string[] = [];
+
+              if (richTextContainerSelector) {
+                nearestStableContainerSelector = richTextContainerSelector;
+                nearestStableContainerClasses = richTextParent ? Array.from(richTextParent.classList) : [];
+              } else if (cardParent) {
+                const cardClass = cardParent.classList[0];
+                nearestStableContainerSelector = cardClass ? `.${cardClass}` : ".w-dyn-item";
+                nearestStableContainerClasses = Array.from(cardParent.classList);
+              } else if (parentClasses.length > 0) {
+                nearestStableContainerSelector = `.${parentClasses[0]}`;
+                nearestStableContainerClasses = parentClasses;
+              }
+
+              let domSelector = "img";
+              let selectorConfidence: "confirmed" | "likely" | "fragile" | "unavailable" = "likely";
+
+              if (elId) {
+                domSelector = `img#${elId}`;
+                selectorConfidence = "confirmed";
+              } else if (whetherInsideRichText && richTextContainerSelector) {
+                domSelector = `${richTextContainerSelector} img`;
+                selectorConfidence = "likely";
+              } else if (parentClasses.length > 0) {
+                domSelector = `.${parentClasses[0]} > img`;
+                selectorConfidence = "likely";
+              } else if (elClasses.length > 0) {
+                domSelector = `img.${elClasses.join(".")}`;
+                selectorConfidence = "likely";
+              } else {
+                domSelector = `img[src*="${imageFilename.slice(0, 30)}"]`;
+                selectorConfidence = "fragile";
+              }
+
               return {
-                url: img.src || "",
-                src: img.src || "",
+                url: src,
+                src: src,
+                resolvedUrl: src,
                 rawSrc: img.getAttribute("src") || "",
+                imageFilename,
                 alt: img.getAttribute("alt") || null,
                 altText: img.getAttribute("alt") || null,
                 hasAltAttribute: img.hasAttribute("alt"),
@@ -413,11 +480,38 @@ export async function processPageAuthoritatively(
                   : "missing_alt_attribute") as any,
                 width,
                 height,
+                widthAttribute: widthAttr || null,
+                heightAttribute: heightAttr || null,
+                computedWidth,
+                computedHeight,
+                cssAspectRatio,
+                naturalWidth: img.naturalWidth || null,
+                naturalHeight: img.naturalHeight || null,
                 hasDimensions,
+                loading: img.getAttribute("loading") || null,
+                fetchpriority: img.getAttribute("fetchpriority") || null,
+                srcset: img.getAttribute("srcset") || null,
+                sizes: img.getAttribute("sizes") || null,
                 isLazyLoaded: img.getAttribute("loading") === "lazy",
                 isExternal: false,
                 isDecorative: img.hasAttribute("alt") && !img.getAttribute("alt")?.trim(),
                 isLinked: Boolean(img.closest("a")),
+                domSelector,
+                selectorConfidence,
+                elementTag: "img",
+                elementId: elId,
+                elementClasses: elClasses,
+                parentTag,
+                parentId,
+                parentClasses,
+                nearestStableContainerSelector,
+                nearestStableContainerClasses,
+                whetherInsideRichText,
+                richTextContainerSelector,
+                whetherInsideArticle,
+                renderedOuterHTML: img.outerHTML || `<img src="${src}">`,
+                sourceMode: "rendered_playwright",
+                crawlTimestamp: new Date().toISOString(),
               };
             });
 

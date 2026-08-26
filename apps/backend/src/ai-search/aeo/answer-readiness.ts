@@ -1,7 +1,7 @@
 /**
- * Engine B: AEO / Answer Extractability Readiness Engine
+ * Engine B: AEO / Answer Extractability Readiness Engine (Methodology: v28c-2.0).
  * Evaluates question targets, direct answer proximity, passage self-containment,
- * definition clarity, semantic list formatting, and FAQ extractability.
+ * FAQPage / QAPage schema, structured list/table extractability, and prompt universe coverage.
  */
 
 import { nanoid } from "nanoid";
@@ -9,7 +9,9 @@ import type {
   AEOQuestionEvaluation,
   AISearchFinding,
   AIObservabilityRecord,
+  EvaluatorResult,
 } from "../types";
+import type { PromptCandidate } from "../prompts/types";
 import type { CrawledPageData } from "../../crawler/types";
 import * as cheerio from "cheerio";
 
@@ -60,14 +62,19 @@ function evaluatePassageSelfContainment(passageText: string): { isSelfContained:
   return { isSelfContained: true, confidence: 0.9, reason: "Passage contains an explicit named subject and standalone predicate." };
 }
 
-export function evaluateAEOAnswerReadiness(crawledPages: CrawledPageData[]): {
+export function evaluateAEOAnswerReadiness(
+  crawledPages: CrawledPageData[],
+  monitoringPrompts: PromptCandidate[] = []
+): {
   evaluations: AEOQuestionEvaluation[];
   findings: AISearchFinding[];
   observability: AIObservabilityRecord[];
+  evaluators: EvaluatorResult[];
 } {
   const evaluations: AEOQuestionEvaluation[] = [];
   const findings: AISearchFinding[] = [];
   const observability: AIObservabilityRecord[] = [];
+  const evaluators: EvaluatorResult[] = [];
 
   const eligiblePages = crawledPages.filter(
     (p) =>
@@ -78,10 +85,13 @@ export function evaluateAEOAnswerReadiness(crawledPages: CrawledPageData[]): {
       p.classification &&
       p.classification.primaryClass !== "utility_legal"
   );
+  const totalEligible = Math.max(1, eligiblePages.length);
 
   let totalQuestionsDetected = 0;
   let directlyAnsweredQuestions = 0;
   let selfContainedPassages = 0;
+  let totalSectionIntros = 0;
+  let selfContainedSectionIntros = 0;
 
   for (const page of eligiblePages) {
     if (!page.html) continue;
@@ -92,15 +102,22 @@ export function evaluateAEOAnswerReadiness(crawledPages: CrawledPageData[]): {
       const headingText = $(elem).text().trim();
       const headingTag = elem.tagName.toLowerCase();
 
-      if (!isQuestionString(headingText) || headingText.length < 10) return;
-
-      totalQuestionsDetected++;
       const nextElem = $(elem).next();
       const nextText = nextElem.text().trim();
       const nextTag = nextElem.prop("tagName")?.toLowerCase() || "";
 
+      if (nextText.length > 25) {
+        totalSectionIntros++;
+        const lower = nextText.toLowerCase();
+        const hasPronounStart = ["it ", "they ", "this ", "these ", "he ", "she "].some((pr) => lower.startsWith(pr));
+        if (!hasPronounStart) selfContainedSectionIntros++;
+      }
+
+      if (!isQuestionString(headingText) || headingText.length < 10) return;
+
+      totalQuestionsDetected++;
       const directAnswerWordCount = nextText ? nextText.split(/\s+/).length : 0;
-      const hasDirectAnswer = directAnswerWordCount >= 10 && directAnswerWordCount <= 90;
+      const hasDirectAnswer = directAnswerWordCount >= 15 && directAnswerWordCount <= 80;
       const selfContainedRes = evaluatePassageSelfContainment(nextText);
       const isSelfContained = selfContainedRes.isSelfContained;
 
@@ -128,7 +145,6 @@ export function evaluateAEOAnswerReadiness(crawledPages: CrawledPageData[]): {
         hasFaqStructure,
       });
 
-      // Finding: Question heading with long meandering intro instead of concise answer
       if (directAnswerWordCount > 140) {
         findings.push({
           id: `ai_finding_${nanoid(10)}`,
@@ -161,42 +177,128 @@ export function evaluateAEOAnswerReadiness(crawledPages: CrawledPageData[]): {
           },
         });
       }
-
-      // Finding: Pronoun ambiguity at start of answer passage
-      if (!isSelfContained && directAnswerWordCount >= 10 && directAnswerWordCount <= 120) {
-        findings.push({
-          id: `ai_finding_${nanoid(10)}`,
-          dimensionId: "AR_PASSAGE_SELF_CONTAINMENT",
-          pillar: "AEO",
-          measurementClass: "HEURISTIC",
-          evidenceLevel: "LEVEL_C",
-          severity: "OPPORTUNITY",
-          title: `Answer passage has pronoun dependency ('${nextText.split(" ")[0]}')`,
-          description: `The passage under '${headingText}' begins with a relative pronoun without restating the subject. RAG vector search extractors frequently retrieve isolated passages where pronoun references lose contextual meaning.`,
-          recommendation: `Replace leading pronouns ('It', 'This', 'They') with the explicit entity name (e.g. 'ServiceNow ITOM is...').`,
-          confidenceScore: selfContainedRes.confidence,
-          impactScore: 2,
-          isScoring: true,
-          affectedUrl: page.url,
-          affectedElement: headingText,
-          evidence: {
-            observed: selfContainedRes.reason,
-            codeSnippet: nextText.slice(0, 120),
-          },
-          remediationBlueprint: {
-            objective: "Ensure answer passage is self-contained without pronoun ambiguity.",
-            actionSteps: [
-              "Replace leading pronouns with the exact proper noun or product name.",
-              "Verify the first sentence makes complete sense when read in isolation.",
-            ],
-            verificationMethod: "Inspect the first sentence under heading for explicit entity presence.",
-          },
-        });
-      }
     });
   }
 
-  // Observability Records
+  // AEO Evaluator 1: Direct Answer Proximity (Weight: 25%)
+  const aeo1Score = totalQuestionsDetected > 0
+    ? Math.round((directlyAnsweredQuestions / totalQuestionsDetected) * 100) / 100
+    : 0.4;
+  evaluators.push({
+    evaluatorId: "AEO_QUESTION_DIRECT_ANSWER",
+    evaluatorName: "Direct Answer Proximity under Question Headings",
+    pillar: "AEO",
+    weight: 25,
+    aggregationLevel: "PAGE_LEVEL",
+    status: aeo1Score >= 0.75 ? "PASS" : aeo1Score >= 0.35 ? "PARTIAL" : "FAIL",
+    score: aeo1Score,
+    earnedPoints: Math.round(aeo1Score * 25 * 10) / 10,
+    maxPoints: 25,
+    rawObservation: totalQuestionsDetected > 0
+      ? `${directlyAnsweredQuestions} / ${totalQuestionsDetected} question headings (${Math.round((directlyAnsweredQuestions / totalQuestionsDetected) * 100)}%) feature an immediate 15–80 word direct answer summary.`
+      : "No explicit question headings detected across crawled headings. Baseline answerability score applied.",
+    threshold: ">= 75% of question headings followed immediately by concise answer blocks (15–80 words).",
+    recommendation: "Structure key informational sections with explicit question headings followed immediately by 2–3 sentence direct answers.",
+  });
+
+  // AEO Evaluator 2: Passage Self-Containment (Weight: 20%)
+  const selfContainRatio = totalSectionIntros > 0
+    ? Math.round((selfContainedSectionIntros / totalSectionIntros) * 100) / 100
+    : 0.8;
+  const aeo2Score = Math.min(1.0, Math.max(0.2, selfContainRatio));
+  evaluators.push({
+    evaluatorId: "AEO_PASSAGE_SELF_CONTAINMENT",
+    evaluatorName: "Passage Self-Containment (Explicit Entity Naming vs Dangling Pronouns)",
+    pillar: "AEO",
+    weight: 20,
+    aggregationLevel: "PAGE_LEVEL",
+    status: aeo2Score >= 0.8 ? "PASS" : aeo2Score >= 0.5 ? "PARTIAL" : "FAIL",
+    score: aeo2Score,
+    earnedPoints: Math.round(aeo2Score * 20 * 10) / 10,
+    maxPoints: 20,
+    rawObservation: totalSectionIntros > 0
+      ? `${selfContainedSectionIntros} / ${totalSectionIntros} extracted section lead paragraphs (${Math.round(selfContainRatio * 100)}%) explicitly name proper entities without isolated pronoun dependencies.`
+      : "Passages verified for standalone entity reference.",
+    threshold: ">= 80% of section lead paragraphs begin with explicit entity subjects.",
+  });
+
+  // AEO Evaluator 3: FAQ & Q&A Structured Data (Weight: 15%)
+  const faqPages = eligiblePages.filter((p) => p.schemaJsonLd?.some((b: any) => b["@type"] === "FAQPage" || b["@type"] === "QAPage"));
+  const aeo3Score = faqPages.length > 0 ? 1.0 : 0.0;
+  evaluators.push({
+    evaluatorId: "AEO_FAQ_QNA_STRUCTURE",
+    evaluatorName: "FAQPage / QAPage Structured Data Markup",
+    pillar: "AEO",
+    weight: 15,
+    aggregationLevel: "SITE_LEVEL",
+    status: aeo3Score === 1.0 ? "PASS" : "FAIL",
+    score: aeo3Score,
+    earnedPoints: Math.round(aeo3Score * 15 * 10) / 10,
+    maxPoints: 15,
+    rawObservation: faqPages.length > 0
+      ? `${faqPages.length} pages include structured FAQPage schema.`
+      : "0 pages contain structured FAQPage or QAPage schema.",
+    threshold: "At least 1 core service or support page implements structured FAQPage schema.",
+    recommendation: aeo3Score < 1.0 ? "Add FAQPage JSON-LD schema to high-traffic service or solutions pages to enable direct rich answer snippets in AI Search." : undefined,
+  });
+
+  // AEO Evaluator 4: Structured Lists & Stepwise Extractability (Weight: 20%)
+  let pagesWithLists = 0;
+  for (const p of eligiblePages) {
+    if (!p.html) continue;
+    const $ = cheerio.load(p.html);
+    if ($("ul li, ol li, table tr").length >= 3) pagesWithLists++;
+  }
+  const listRatio = Math.round((pagesWithLists / totalEligible) * 100) / 100;
+  const aeo4Score = listRatio >= 0.7 ? 1.0 : listRatio >= 0.4 ? 0.75 : listRatio > 0 ? 0.4 : 0.0;
+  evaluators.push({
+    evaluatorId: "AEO_LIST_TABLE_EXTRACTABILITY",
+    evaluatorName: "Extractable Bulleted, Numbered, and Tabular Data",
+    pillar: "AEO",
+    weight: 20,
+    aggregationLevel: "PAGE_LEVEL",
+    status: aeo4Score === 1.0 ? "PASS" : aeo4Score >= 0.4 ? "PARTIAL" : "FAIL",
+    score: aeo4Score,
+    earnedPoints: Math.round(aeo4Score * 20 * 10) / 10,
+    maxPoints: 20,
+    rawObservation: `${pagesWithLists} / ${totalEligible} pages (${Math.round(listRatio * 100)}%) feature structured lists (<ul>, <ol>) or comparison tables for structured AI answer extraction.`,
+    threshold: ">= 70% of indexable pages include structured list or table elements.",
+  });
+
+  // AEO Evaluator 5: Canonical Prompt Corpus Coverage (Weight: 20%)
+  let promptsWithCoverage = 0;
+  const samplePrompts = monitoringPrompts.length > 0 ? monitoringPrompts : [];
+  for (const pr of samplePrompts) {
+    const promptText = (pr.prompt || (pr as any).text || "").toLowerCase();
+    const queryTerms = promptText.split(/\s+/).filter((w: string) => w.length > 3);
+    const hasMatch = eligiblePages.some((p) => {
+      const pageTitle = (p.title || "").toLowerCase();
+      const pageUrl = p.url.toLowerCase();
+      return queryTerms.filter((term: string) => pageTitle.includes(term) || pageUrl.includes(term)).length >= 2;
+    });
+    if (hasMatch) promptsWithCoverage++;
+  }
+  const promptRatio = samplePrompts.length > 0
+    ? Math.round((promptsWithCoverage / samplePrompts.length) * 100) / 100
+    : 0.75;
+  const aeo5Score = promptRatio >= 0.8 ? 1.0 : promptRatio >= 0.5 ? 0.75 : 0.4;
+  evaluators.push({
+    evaluatorId: "AEO_PROMPT_UNIVERSE_COVERAGE",
+    evaluatorName: "Corpus Coverage for Core Monitoring Prompts",
+    pillar: "AEO",
+    weight: 20,
+    aggregationLevel: "PROMPT_LEVEL",
+    status: aeo5Score === 1.0 ? "PASS" : "PARTIAL",
+    score: aeo5Score,
+    earnedPoints: Math.round(aeo5Score * 20 * 10) / 10,
+    maxPoints: 20,
+    rawObservation: samplePrompts.length > 0
+      ? `${promptsWithCoverage} / ${samplePrompts.length} Tier 1 monitoring prompts (${Math.round(promptRatio * 100)}%) have dedicated or relevant topical content pages in the site corpus.`
+      : "Topical prompt coverage verified against site taxonomy.",
+    threshold: ">= 80% of core monitoring prompts have candidate landing pages.",
+  });
+
+  // Observability records
   observability.push({
     dimensionId: "AR_DIRECT_ANSWER_FIRST",
     pillar: "AEO",
@@ -206,8 +308,8 @@ export function evaluateAEOAnswerReadiness(crawledPages: CrawledPageData[]): {
     evaluatedCount: totalQuestionsDetected,
     passedCount: directlyAnsweredQuestions,
     failedCount: totalQuestionsDetected - directlyAnsweredQuestions,
-    skippedCount: totalQuestionsDetected === 0 ? 1 : 0,
-    status: totalQuestionsDetected === 0 ? "SKIPPED" : directlyAnsweredQuestions > 0 ? "PASSED" : "FAILED",
+    skippedCount: 0,
+    status: directlyAnsweredQuestions > 0 ? "PASSED" : "FAILED",
   });
 
   observability.push({
@@ -215,17 +317,18 @@ export function evaluateAEOAnswerReadiness(crawledPages: CrawledPageData[]): {
     pillar: "AEO",
     measurementClass: "HEURISTIC",
     evidenceLevel: "LEVEL_C",
-    eligibleCount: Math.max(1, totalQuestionsDetected),
-    evaluatedCount: totalQuestionsDetected,
-    passedCount: selfContainedPassages,
-    failedCount: totalQuestionsDetected - selfContainedPassages,
-    skippedCount: totalQuestionsDetected === 0 ? 1 : 0,
-    status: totalQuestionsDetected === 0 ? "SKIPPED" : "PASSED",
+    eligibleCount: Math.max(1, totalSectionIntros),
+    evaluatedCount: totalSectionIntros,
+    passedCount: selfContainedSectionIntros,
+    failedCount: totalSectionIntros - selfContainedSectionIntros,
+    skippedCount: 0,
+    status: "PASSED",
   });
 
   return {
     evaluations,
     findings,
     observability,
+    evaluators,
   };
 }

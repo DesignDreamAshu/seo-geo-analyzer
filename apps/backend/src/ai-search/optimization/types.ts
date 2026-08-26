@@ -5,10 +5,11 @@
  * Completely isolated from traditional SEO diagnostic models.
  */
 
-export const AI_OPTIMIZATION_ENGINE_VERSION = "phase28g1-hardened";
+export const AI_OPTIMIZATION_ENGINE_VERSION = "phase28h-advanced-content-intelligence";
 
 export type AIOptimizationCategoryCapabilityStatus =
   | "FULLY_IMPLEMENTED"
+  | "PARTIAL_IMPLEMENTATION"
   | "DERIVED_FROM_ANOTHER_EVALUATOR"
   | "RESERVED_FOR_FUTURE_EXPANSION"
   | "NOT_IMPLEMENTED";
@@ -19,16 +20,16 @@ export const AI_OPTIMIZATION_CATEGORY_CAPABILITIES: Record<
 > = {
   ENTITY_CLARITY: { status: "FULLY_IMPLEMENTED", evaluatorOrSource: "evaluateEntityClarity" },
   ANSWER_COVERAGE: { status: "FULLY_IMPLEMENTED", evaluatorOrSource: "evaluateAnswerCoverage" },
-  PROMPT_INTENT_COVERAGE: { status: "FULLY_IMPLEMENTED", evaluatorOrSource: "evaluateAnswerCoverage (Intent Alignment)" },
-  PAGE_TARGETING: { status: "FULLY_IMPLEMENTED", evaluatorOrSource: "evaluateAnswerCoverage (Page Targeting)" },
+  PROMPT_INTENT_COVERAGE: { status: "FULLY_IMPLEMENTED", evaluatorOrSource: "evaluatePromptIntentCoverage" },
+  PAGE_TARGETING: { status: "FULLY_IMPLEMENTED", evaluatorOrSource: "evaluatePageTargeting" },
   STRUCTURED_ENTITY_SIGNAL: { status: "FULLY_IMPLEMENTED", evaluatorOrSource: "evaluateStructuredSignals" },
   KNOWLEDGE_CONSISTENCY: { status: "FULLY_IMPLEMENTED", evaluatorOrSource: "evaluateKnowledgeConsistency" },
   COMPETITOR_VISIBILITY_GAP: { status: "FULLY_IMPLEMENTED", evaluatorOrSource: "evaluateCompetitorGap" },
   SOURCE_CITATION_READINESS: { status: "FULLY_IMPLEMENTED", evaluatorOrSource: "evaluateSourceReadiness" },
-  CONTENT_AUTHORITY: { status: "DERIVED_FROM_ANOTHER_EVALUATOR", evaluatorOrSource: "Derived from Evidence/Profile extraction" },
-  EVIDENCE_SUPPORT: { status: "DERIVED_FROM_ANOTHER_EVALUATOR", evaluatorOrSource: "Derived from Source Readiness / Quantitative claims" },
-  AI_DISCOVERABILITY: { status: "DERIVED_FROM_ANOTHER_EVALUATOR", evaluatorOrSource: "Derived from Technical AI Readiness crawler policies" },
-  CONTENT_SPECIFICITY: { status: "DERIVED_FROM_ANOTHER_EVALUATOR", evaluatorOrSource: "Derived from Semantic Answer Completeness evaluation" },
+  CONTENT_SPECIFICITY: { status: "FULLY_IMPLEMENTED", evaluatorOrSource: "evaluateContentSpecificity" },
+  EVIDENCE_SUPPORT: { status: "FULLY_IMPLEMENTED", evaluatorOrSource: "evaluateEvidenceSupport" },
+  CONTENT_AUTHORITY: { status: "PARTIAL_IMPLEMENTATION", evaluatorOrSource: "evaluateContentAuthority (Observable Expertise & Framework Signals)" },
+  AI_DISCOVERABILITY: { status: "PARTIAL_IMPLEMENTATION", evaluatorOrSource: "evaluateAIDiscoverability (Deterministic AI Crawler Directives)" },
 };
 
 export type AIOptimizationCategory =
@@ -206,6 +207,9 @@ export interface AIOptimizationFinding {
   }>;
   affectedEntities: string[];
   affectedProviders: string[];
+
+  supportingCategories?: AIOptimizationCategory[];
+  supportingSignals?: string[];
 
   recommendation: AIOptimizationRecommendation;
   verificationMethod: AIOptimizationVerificationMethod;

@@ -126,8 +126,42 @@ export interface EntityGroundingEvaluation {
   localEntityGroundingComplete: boolean;
 }
 
+export type EvaluationStatus =
+  | "FULLY_EVALUATED"
+  | "SUBSTANTIALLY_EVALUATED"
+  | "PARTIALLY_EVALUATED"
+  | "INSUFFICIENT_EVIDENCE";
+
+export type EvaluatorStatus = "PASS" | "PARTIAL" | "FAIL" | "NOT_EVALUATED" | "NOT_APPLICABLE";
+
+export interface EvaluatorResult {
+  evaluatorId: string;
+  evaluatorName: string;
+  pillar: AISearchPillar;
+  weight: number; // Sums to 100 within pillar
+  aggregationLevel: "SITE_LEVEL" | "PAGE_LEVEL" | "PROMPT_LEVEL" | "ENTITY_LEVEL";
+  status: EvaluatorStatus;
+  score: number; // 0.0 to 1.0
+  earnedPoints: number;
+  maxPoints: number;
+  rawObservation: string;
+  threshold: string;
+  recommendation?: string;
+  evidence?: any;
+}
+
 export interface AIReadinessSubScore {
-  score: number; // 0 - 100
+  score: number | null; // 0 - 100 or null if NOT_EVALUATED / INSUFFICIENT_EVIDENCE
+  weight?: number;
+  eligibleWeight?: number;
+  evaluatedWeight?: number;
+  evaluationCoverage?: number;
+  evaluationStatus?: EvaluationStatus;
+  evaluators?: EvaluatorResult[];
+  passedChecks?: string[];
+  partialChecks?: string[];
+  failedChecks?: string[];
+  recommendations?: string[];
   eligibleDimensions: number;
   evaluatedDimensions: number;
   passedDimensions: number;
@@ -138,7 +172,10 @@ export interface AIReadinessSubScore {
 }
 
 export interface AIReadinessScoreBreakdown {
-  scoreModelVersion: string; // "v28b-1.0"
+  scoreModelVersion: string; // "v28c-2.1"
+  overallScore?: number | null;
+  overallCoverage?: number;
+  overallStatus?: EvaluationStatus;
   technicalAccessibility: AIReadinessSubScore;
   aeoReadiness: AIReadinessSubScore;
   geoEvidenceReadiness: AIReadinessSubScore;

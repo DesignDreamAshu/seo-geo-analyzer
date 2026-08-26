@@ -22,16 +22,29 @@ export function evaluateStructuredSignals(
     const urlLower = p.url.toLowerCase();
     const isBlogOrNews = urlLower.includes("/post/") || urlLower.includes("/blogs") || urlLower.includes("/news/");
     const isJobOrLegal = urlLower.includes("/jobopenings/") || urlLower.includes("/privacy") || urlLower.includes("/terms");
-    if (isBlogOrNews || isJobOrLegal) return false;
+    const isEventOrKickoff =
+      urlLower.includes("kickoff") ||
+      urlLower.includes("/event") ||
+      urlLower.includes("/webinar") ||
+      urlLower.includes("/conference") ||
+      urlLower.includes("/summit");
 
-    return (
+    if (isBlogOrNews || isJobOrLegal || isEventOrKickoff) return false;
+
+    // True commercial service/solution capability pages
+    const isSolutionSlug =
       urlLower.includes("/solution-") ||
       urlLower.endsWith("/solutions") ||
       urlLower.endsWith("/solutions/") ||
-      urlLower.includes("/service") ||
+      urlLower.includes("/solutions/") ||
       urlLower.includes("/cloudsmith") ||
-      urlLower.includes("/odyssey")
-    );
+      urlLower.includes("/odyssey");
+
+    const isExplicitServiceHub =
+      (urlLower.includes("/service/") || urlLower.endsWith("/services") || urlLower.endsWith("/services/")) &&
+      !urlLower.includes("kickoff");
+
+    return isSolutionSlug || isExplicitServiceHub;
   });
 
   const missingServiceSchemaPages = servicePages.filter(

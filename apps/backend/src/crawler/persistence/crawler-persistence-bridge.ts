@@ -39,53 +39,73 @@ export interface ExecuteAndPersistAuditOutput {
   crawlResult?: any;
 }
 
+const projectSequenceLocks = new Map<string, Promise<any>>();
+
+async function withProjectSequenceLock<T>(projectId: string, fn: () => Promise<T>): Promise<T> {
+  const currentLock = projectSequenceLocks.get(projectId) || Promise.resolve();
+  let release: () => void;
+  const newLock = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  projectSequenceLocks.set(projectId, newLock);
+  try {
+    await currentLock;
+    return await fn();
+  } finally {
+    release!();
+  }
+}
+
 export async function executeAndPersistAudit(
   input: ExecuteAndPersistAuditInput
 ): Promise<ExecuteAndPersistAuditOutput> {
   const { project, persistenceLayer, crawlOptions, trigger = "MANUAL", customCrawlerExecutor } = input;
 
-  // 1. Get next project-local sequence number
-  const sequenceNumber = await persistenceLayer.auditRuns.getNextSequenceNumber(project.projectId);
-  const auditRunId = `audit_${project.projectId}_seq_${sequenceNumber}_${Date.now()}`;
-  const startedAt = new Date().toISOString();
+  // 1. Get next project-local sequence number and create audit run atomically
+  const { auditRun, ruleContext } = await withProjectSequenceLock(project.projectId, async () => {
+    const sequenceNumber = await persistenceLayer.auditRuns.getNextSequenceNumber(project.projectId);
+    const auditRunId = `audit_${project.projectId}_seq_${sequenceNumber}_${Date.now()}`;
+    const startedAt = new Date().toISOString();
 
-  // 2. Initialize Rule Evaluation Context
-  const evaluatedRuleIds = IMPLEMENTED_DIAGNOSTIC_RULES.map((r) => r.ruleCode);
-  const ruleContext = {
-    productionRuleCount: 95,
-    ruleInventoryVersion: "1.0.0",
-    evaluatedRuleIds,
-  };
-
-
-  // 3. Create Audit Run in RUNNING state
-  const auditRun = await persistenceLayer.auditRuns.createAuditRun({
-    auditRunId,
-    projectId: project.projectId,
-    sequenceNumber,
-    startedAt,
-    status: "RUNNING",
-    trigger,
-    crawlerVersion: "2.4.0",
-    ruleInventoryVersion: "1.0.0",
-    productionRuleCount: 95,
-    policyVersions: JSON.stringify({ policyVersion: "1.1.0" }),
-    configurationSnapshot: {
-      crawlSettings: {
-        maxPages: crawlOptions.maxPages ?? 150,
-        maxDepth: crawlOptions.maxDepth ?? 5,
-        userAgent: (crawlOptions as any).userAgent,
-        respectRobotsTxt: (crawlOptions as any).respectRobotsTxt !== false,
-      },
-      countryContext: project.defaultCountry || "US",
-      deviceContext: project.defaultDevice || "MOBILE",
+    const evaluatedRuleIds = IMPLEMENTED_DIAGNOSTIC_RULES.map((r) => r.ruleCode);
+    const context = {
+      productionRuleCount: IMPLEMENTED_DIAGNOSTIC_RULES.length,
       ruleInventoryVersion: "1.0.0",
-      productionRuleCount: 95,
+      evaluatedRuleIds,
+    };
+
+    const run = await persistenceLayer.auditRuns.createAuditRun({
+      auditRunId,
+      projectId: project.projectId,
+      sequenceNumber,
+      startedAt,
+      status: "RUNNING",
+      trigger,
       crawlerVersion: "2.4.0",
-      policyVersions: { policyVersion: "1.1.0" },
-      ruleEvaluationContext: ruleContext,
-    },
+      ruleInventoryVersion: "1.0.0",
+      productionRuleCount: IMPLEMENTED_DIAGNOSTIC_RULES.length,
+      policyVersions: JSON.stringify({ policyVersion: "1.1.0" }),
+      configurationSnapshot: {
+        crawlSettings: {
+          maxPages: crawlOptions.maxPages ?? 150,
+          maxDepth: crawlOptions.maxDepth ?? 5,
+          userAgent: (crawlOptions as any).userAgent,
+          respectRobotsTxt: (crawlOptions as any).respectRobotsTxt !== false,
+        },
+        countryContext: project.defaultCountry || "US",
+        deviceContext: project.defaultDevice || "MOBILE",
+        ruleInventoryVersion: "1.0.0",
+        productionRuleCount: 95,
+        crawlerVersion: "2.4.0",
+        policyVersions: { policyVersion: "1.1.0" },
+        ruleEvaluationContext: context,
+      },
+    });
+
+    return { auditRun: run, ruleContext: context };
   });
+
+  const auditRunId = auditRun.auditRunId;
 
   // 4. Run real crawler pipeline (or custom fixture executor)
   const crawlerExecutor = customCrawlerExecutor || runSiteAuditCrawl;
@@ -148,16 +168,21 @@ export async function executeAndPersistAudit(
       informationalCount += issue.affectedPages?.length || 1;
     }
 
+    const seenFingerprints = new Map<string, number>();
     for (const aff of issue.affectedPages || []) {
       const normalizedUrl = aff.url;
-      const targetResource = aff.evidence?.targetUrl || undefined;
-      const fprint = generateStableFindingFingerprint({
+      const targetResource = aff.evidence?.targetUrl || aff.evidence?.imageSrc || aff.evidence?.src || aff.evidence?.domSelector || undefined;
+      const baseFprint = generateStableFindingFingerprint({
         projectId: project.projectId,
         ruleId: issue.code,
         normalizedUrl,
         targetResource,
         evidence: aff.evidence as any,
       });
+
+      const count = seenFingerprints.get(baseFprint) || 0;
+      seenFingerprints.set(baseFprint, count + 1);
+      const fprint = count === 0 ? baseFprint : `${baseFprint}__occ_${count}`;
 
       auditFindings.push({
         auditFindingId: `f_${auditRunId}_${auditFindings.length + 1}`,
@@ -209,7 +234,7 @@ export async function executeAndPersistAudit(
     payloadJson: JSON.stringify({
       auditRunId,
       projectId: project.projectId,
-      sequenceNumber,
+      sequenceNumber: auditRun.sequenceNumber,
       crawlResult,
       crawlSummary: (crawlResult as any).summary || { score: seoScore, totalIssues: totalFindings },
       pagesCount: auditPages.length,
@@ -236,7 +261,7 @@ export async function executeAndPersistAudit(
   // 10. Generate Default Comparison against previous audit if available
   let comparison: AuditComparisonResult | null = null;
   const allProjectRuns = await persistenceLayer.auditRuns.listAuditRunsForProject(project.projectId);
-  const previousRun = allProjectRuns.find((r) => r.sequenceNumber === sequenceNumber - 1 && r.status === "COMPLETED");
+  const previousRun = allProjectRuns.find((r) => r.sequenceNumber === auditRun.sequenceNumber - 1 && r.status === "COMPLETED");
 
   if (previousRun) {
     const basePages = await persistenceLayer.auditPages.getPagesForAuditRun(previousRun.auditRunId);

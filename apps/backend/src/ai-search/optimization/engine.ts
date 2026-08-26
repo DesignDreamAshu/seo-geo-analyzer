@@ -12,6 +12,12 @@ import { AIObservation } from "../observation/types";
 import { PromptPageMapper, CrawledPageContext } from "./mapper";
 import { evaluateEntityClarity } from "./evaluators/entity-clarity";
 import { evaluateAnswerCoverage } from "./evaluators/answer-coverage";
+import { evaluatePromptIntentCoverage } from "./evaluators/prompt-intent-coverage";
+import { evaluatePageTargeting } from "./evaluators/page-targeting";
+import { evaluateContentSpecificity } from "./evaluators/content-specificity";
+import { evaluateEvidenceSupport } from "./evaluators/evidence-support";
+import { evaluateContentAuthority } from "./evaluators/content-authority";
+import { evaluateAIDiscoverability } from "./evaluators/ai-discoverability";
 import { evaluateStructuredSignals } from "./evaluators/structured-signals";
 import { evaluateKnowledgeConsistency } from "./evaluators/knowledge-consistency";
 import { evaluateCompetitorGap } from "./evaluators/competitor-gap";
@@ -32,7 +38,8 @@ export class AIOptimizationEngine {
     profile: ProjectKnowledgeProfile,
     promptUniverse: PromptUniverseReport,
     observations: AIObservation[] = [],
-    pages: CrawledPageContext[] = []
+    pages: CrawledPageContext[] = [],
+    robotsTxtContent?: string | null
   ): AIOptimizationSnapshot {
     const prompts = promptUniverse.allCandidates || promptUniverse.monitoringSet || (promptUniverse as any).prompts || [];
 
@@ -42,22 +49,40 @@ export class AIOptimizationEngine {
     // 2. Execute all specialized evaluators
     const rawFindings: AIOptimizationFinding[] = [];
 
-    // Evaluator A: Entity Clarity & Disambiguation
+    // Evaluator 1: Entity Clarity & Disambiguation
     rawFindings.push(...evaluateEntityClarity(projectId, runId, observations, pages, profile));
 
-    // Evaluator B: Answer Coverage & Page Targeting
+    // Evaluator 2: Answer Coverage
     rawFindings.push(...evaluateAnswerCoverage(projectId, runId, mappings, profile));
 
-    // Evaluator C: Structured Entity Signals
+    // Evaluator 3: Prompt Intent Coverage
+    rawFindings.push(...evaluatePromptIntentCoverage(projectId, runId, mappings, profile));
+
+    // Evaluator 4: Page Targeting & Competition
+    rawFindings.push(...evaluatePageTargeting(projectId, runId, mappings, profile));
+
+    // Evaluator 5: Content Specificity
+    rawFindings.push(...evaluateContentSpecificity(projectId, runId, pages, mappings, profile));
+
+    // Evaluator 6: Evidence Support
+    rawFindings.push(...evaluateEvidenceSupport(projectId, runId, pages, profile));
+
+    // Evaluator 7: Content Authority (Observable Expertise)
+    rawFindings.push(...evaluateContentAuthority(projectId, runId, pages, profile));
+
+    // Evaluator 8: AI Discoverability (Deterministic Crawl Directives)
+    rawFindings.push(...evaluateAIDiscoverability(projectId, runId, robotsTxtContent, profile));
+
+    // Evaluator 9: Structured Entity Signals
     rawFindings.push(...evaluateStructuredSignals(projectId, runId, pages, profile));
 
-    // Evaluator D: Knowledge Consistency
+    // Evaluator 10: Knowledge Consistency
     rawFindings.push(...evaluateKnowledgeConsistency(projectId, runId, pages, profile));
 
-    // Evaluator E: Competitor Visibility Gaps
+    // Evaluator 11: Competitor Visibility Gaps
     rawFindings.push(...evaluateCompetitorGap(projectId, runId, observations, mappings, profile));
 
-    // Evaluator F: Source Citation Readiness
+    // Evaluator 12: Source Citation Readiness
     rawFindings.push(...evaluateSourceReadiness(projectId, runId, observations, pages, profile));
 
     // 3. Deduplication and Conflict Prevention
