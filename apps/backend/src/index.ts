@@ -97,19 +97,53 @@ async function runDualPSI(url: string) {
   return { normalizedUrl, mobile, desktop };
 }
 
+
 const app = express();
 const defaultOrigins = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
   "http://localhost:8080",
   "http://127.0.0.1:8080",
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
 ];
 const extraOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(",").map((origin) => origin.trim()).filter(Boolean)
   : [];
 const allowedOrigins = [...defaultOrigins, ...extraOrigins];
-app.use(cors({ origin: allowedOrigins }));
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps, curl, server-to-server)
+      if (!origin) return callback(null, true);
+      if (
+        allowedOrigins.includes(origin) ||
+        allowedOrigins.includes("*") ||
+        origin.endsWith(".lovable.app") ||
+        origin.endsWith(".lovableproject.com") ||
+        origin.endsWith(".netlify.app") ||
+        origin.startsWith("http://localhost:") ||
+        origin.startsWith("http://127.0.0.1:")
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, true); // Permissive CORS for deployed SEO tools
+    },
+    credentials: true,
+  })
+);
 app.use(express.json({ limit: "1mb" }));
+
+// Health Check Endpoints
+app.get(["/api/health", "/health"], (req, res) => {
+  res.json({
+    status: "ok",
+    service: "seo-geo-analyzer-backend",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  });
+});
 
 const escapeHtml = (value: string) =>
   value

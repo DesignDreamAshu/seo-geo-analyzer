@@ -1762,17 +1762,18 @@ export function evaluateAllDiagnosticRules(
             occurrences: [
               {
                 occurrenceId: occId,
+                type: "IMAGE_DIMENSIONS",
                 identity: `Missing Dimensions: ${imgFilename}`,
+                pageUrl: page.url,
                 tagName: "img",
                 selector: domSelector,
-                selectorConfidence,
                 snippet,
                 targetUrl: img.resolvedUrl || img.src,
                 attributes: {
                   src: img.src,
                   alt: img.alt || null,
-                  width: img.widthAttribute || null,
-                  height: img.heightAttribute || null,
+                  width: img.widthAttribute != null ? String(img.widthAttribute) : null,
+                  height: img.heightAttribute != null ? String(img.heightAttribute) : null,
                   loading: img.loading || null,
                   fetchpriority: img.fetchpriority || null,
                   srcset: img.srcset || null,
