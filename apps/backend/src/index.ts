@@ -67,9 +67,9 @@ import type { ExportPayload, ModuleSnapshot } from "./types";
 const PSI_URL = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
 
 async function runLighthouseViaPSI(url: string, strategy: "mobile" | "desktop") {
-  const apiKey = process.env.GOOGLE_API_KEY || process.env.PSI_API_KEY;
+  const apiKey = process.env.GOOGLE_API_KEY || process.env.PSI_API_KEY || process.env.PAGESPEED_API_KEY;
   if (!apiKey) {
-    throw new Error("Missing GOOGLE_API_KEY / PSI_API_KEY");
+    throw new Error("Missing GOOGLE_API_KEY / PAGESPEED_API_KEY / PSI_API_KEY");
   }
 
   const { data } = await axios.get(PSI_URL, {
