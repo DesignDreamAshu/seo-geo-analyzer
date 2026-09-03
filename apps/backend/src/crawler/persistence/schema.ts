@@ -293,6 +293,145 @@ export const MIGRATIONS: MigrationDefinition[] = [
       `);
     },
   },
+  {
+    version: 5,
+    name: "005_security_audit_snapshots_and_verification",
+    up: (db: DatabaseSync) => {
+      // 1. Security Audit Snapshots table (Authoritative historical freeze)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS security_audit_snapshots (
+          snapshot_id TEXT PRIMARY KEY,
+          audit_run_id TEXT NOT NULL UNIQUE,
+          project_id TEXT NOT NULL,
+          domain TEXT NOT NULL,
+          started_at TEXT NOT NULL,
+          completed_at TEXT,
+          security_schema_version TEXT NOT NULL,
+          rule_catalog_version TEXT NOT NULL,
+          score_policy_version TEXT NOT NULL,
+          remediation_contract_version TEXT NOT NULL,
+          score REAL NOT NULL,
+          posture_band TEXT NOT NULL,
+          critical_count INTEGER NOT NULL DEFAULT 0,
+          high_count INTEGER NOT NULL DEFAULT 0,
+          medium_count INTEGER NOT NULL DEFAULT 0,
+          low_count INTEGER NOT NULL DEFAULT 0,
+          informational_count INTEGER NOT NULL DEFAULT 0,
+          manual_areas_count INTEGER NOT NULL DEFAULT 10,
+          tests_executed INTEGER NOT NULL DEFAULT 0,
+          passed_controls INTEGER NOT NULL DEFAULT 0,
+          total_rules_registered INTEGER NOT NULL DEFAULT 64,
+          requested_crawl_limit INTEGER,
+          discovered_page_count INTEGER,
+          actual_crawled_page_count INTEGER,
+          is_partial_audit INTEGER NOT NULL DEFAULT 0,
+          payload_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (audit_run_id) REFERENCES audit_runs(audit_run_id) ON DELETE CASCADE,
+          FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_sec_snapshots_project ON security_audit_snapshots(project_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_sec_snapshots_audit_run ON security_audit_snapshots(audit_run_id);
+      `);
+
+      // 2. Security Verification Events table (Immutable targeted fix history)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS security_verification_events (
+          event_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          source_audit_id TEXT NOT NULL,
+          finding_id TEXT NOT NULL,
+          rule_id TEXT NOT NULL,
+          target_url TEXT,
+          started_at TEXT NOT NULL,
+          completed_at TEXT NOT NULL,
+          method TEXT NOT NULL,
+          scope TEXT NOT NULL,
+          result TEXT NOT NULL,
+          evidence_summary TEXT NOT NULL,
+          error_message TEXT,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (source_audit_id) REFERENCES audit_runs(audit_run_id) ON DELETE CASCADE,
+          FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_sec_verify_project ON security_verification_events(project_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_sec_verify_finding ON security_verification_events(project_id, finding_id);
+        CREATE INDEX IF NOT EXISTS idx_sec_verify_source_audit ON security_verification_events(source_audit_id);
+      `);
+    },
+  },
+  {
+    version: 6,
+    name: "006_ai_provider_certifications",
+    up: (db: DatabaseSync) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS ai_provider_certifications (
+          certification_id TEXT PRIMARY KEY,
+          provider TEXT NOT NULL,
+          gateway TEXT NOT NULL,
+          requested_model_id TEXT NOT NULL,
+          resolved_model_id TEXT,
+          underlying_provider TEXT,
+          timestamp TEXT NOT NULL,
+          certification_version TEXT NOT NULL,
+          authentication TEXT NOT NULL,
+          connectivity TEXT NOT NULL,
+          basic_completion TEXT NOT NULL,
+          structured_output TEXT NOT NULL,
+          usage_metadata TEXT NOT NULL,
+          timeout_handling TEXT NOT NULL,
+          error_normalization TEXT NOT NULL,
+          dream_seo_contract_mapping TEXT NOT NULL,
+          latency_ms INTEGER NOT NULL DEFAULT 0,
+          input_tokens INTEGER NOT NULL DEFAULT 0,
+          output_tokens INTEGER NOT NULL DEFAULT 0,
+          total_tokens INTEGER NOT NULL DEFAULT 0,
+          estimated_cost_usd REAL NOT NULL DEFAULT 0.0,
+          overall_result TEXT NOT NULL,
+          failure_reason TEXT,
+          declared_capabilities_json TEXT NOT NULL,
+          verified_capabilities_json TEXT NOT NULL,
+          verification_notes_json TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_ai_cert_provider ON ai_provider_certifications(provider, requested_model_id, timestamp DESC);
+      `);
+    },
+  },
+  {
+    version: 7,
+    name: "007_ai_analysis_reports",
+    up: (db: DatabaseSync) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS ai_analysis_reports (
+          report_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          audit_run_id TEXT NOT NULL,
+          generated_at TEXT NOT NULL,
+          provider TEXT NOT NULL,
+          gateway TEXT NOT NULL,
+          requested_model TEXT NOT NULL,
+          resolved_model TEXT,
+          input_tokens INTEGER NOT NULL DEFAULT 0,
+          output_tokens INTEGER NOT NULL DEFAULT 0,
+          total_tokens INTEGER NOT NULL DEFAULT 0,
+          estimated_cost_usd REAL NOT NULL DEFAULT 0.0,
+          latency_ms INTEGER NOT NULL DEFAULT 0,
+          entitlement_source TEXT NOT NULL,
+          credits_consumed INTEGER NOT NULL DEFAULT 0,
+          generation_status TEXT NOT NULL,
+          schema_version TEXT NOT NULL,
+          report_payload_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (audit_run_id) REFERENCES audit_runs(audit_run_id) ON DELETE CASCADE,
+          FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_ai_reports_project ON ai_analysis_reports(project_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_ai_reports_audit ON ai_analysis_reports(audit_run_id);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: DatabaseSync): { currentVersion: number; appliedCount: number } {

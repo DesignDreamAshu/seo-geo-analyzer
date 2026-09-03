@@ -147,7 +147,7 @@ export interface AnalysisContext {
   locale: string;
   targetCountry: string | null;
   strategy: AnalyzeStrategy;
-  psi: PsiResponse;
+  psi: PsiResponse | null;
   html: string;
   dom: CheerioAPI;
   headers: Record<string, string>;
@@ -165,7 +165,7 @@ export interface AnalysisResult {
   overall: number;
   modules: ModuleResult[];
   raw: {
-    psi: PsiResponse;
+    psi: PsiResponse | null;
     headers: Record<string, string>;
     robots: string | null;
     sitemap: SitemapSummary | null;

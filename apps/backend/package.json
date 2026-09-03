@@ -11,6 +11,18 @@
     "verify:release": "tsx src/crawler/verification/release-orchestrator.ts",
     "verify:local-accuracy": "tsx src/crawler/verification/local-accuracy-orchestrator.ts",
     "verify:deployed": "tsx src/crawler/verification/verify-deployed-service.ts",
+    "test:security:s1": "tsx src/crawler/security/__tests__/run-security-s1-tests.ts",
+    "test:security:s2": "tsx src/crawler/security/__tests__/run-security-s2-tests.ts",
+    "test:security:s3": "tsx src/crawler/security/__tests__/run-security-s3-certification.ts",
+    "test:security:s4": "tsx src/crawler/security/__tests__/run-security-s4-remediation-tests.ts",
+    "test:security:s5": "tsx src/crawler/security/__tests__/run-security-s5-score-tests.ts",
+    "test:security:s6": "tsx src/crawler/security/__tests__/run-security-s6-tests.ts",
+    "test:security:s7": "tsx src/crawler/security/__tests__/run-security-s7-tests.ts",
+    "test:security": "tsx src/crawler/security/__tests__/run-all-security-tests.ts",
+    "test:security:all-raw": "tsx src/crawler/security/__tests__/run-security-s1-tests.ts && tsx src/crawler/security/__tests__/run-security-s2-tests.ts && tsx src/crawler/security/__tests__/run-security-s3-certification.ts && tsx src/crawler/security/__tests__/run-security-s4-remediation-tests.ts && tsx src/crawler/security/__tests__/run-security-s5-score-tests.ts && tsx src/crawler/security/__tests__/run-security-s6-tests.ts && tsx src/crawler/security/__tests__/run-security-s7-tests.ts",
+    "test:providers:unit": "tsx src/ai-search/__tests__/run-openrouter-unit-tests.ts",
+    "test:ai:report": "tsx src/ai-search/__tests__/run-ai-report-integration-tests.ts",
+    "certify:providers:live": "tsx src/ai-search/__tests__/run-live-provider-certification.ts",
     "start": "node index.js"
   },
   "dependencies": {

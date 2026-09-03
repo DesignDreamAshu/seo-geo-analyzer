@@ -51,6 +51,8 @@ export interface ExportPayload {
   modules: ModuleSnapshot[];
   historySnapshots?: HistorySnapshot[];
   groupedRecommendations?: Record<"critical" | "warnings" | "improvements", string[]>;
+  security?: any;
+  securityAudit?: any;
 }
 
 export interface ShareRecord {

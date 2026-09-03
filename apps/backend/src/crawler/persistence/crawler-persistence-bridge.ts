@@ -61,6 +61,17 @@ export async function executeAndPersistAudit(
 ): Promise<ExecuteAndPersistAuditOutput> {
   const { project, persistenceLayer, crawlOptions, trigger = "MANUAL", customCrawlerExecutor } = input;
 
+  // Retrieve previous completed audit to determine known scope and known URLs
+  const latestCompletedAudit = await persistenceLayer.auditRuns.getLatestAuditRunForProject(project.projectId);
+  let previousKnownPages: AuditPageEntity[] = [];
+  if (latestCompletedAudit && latestCompletedAudit.status === "COMPLETED") {
+    previousKnownPages = await persistenceLayer.auditPages.getPagesForAuditRun(latestCompletedAudit.auditRunId);
+  }
+  const knownScope = previousKnownPages.length;
+  const knownUrls = crawlOptions.knownUrls || previousKnownPages.map((p) => p.normalizedUrl);
+
+  const discoveryCeiling = crawlOptions.discoveryCeiling || crawlOptions.maxPages || project.metadata?.crawlDiscoveryCeiling || 300;
+
   // 1. Get next project-local sequence number and create audit run atomically
   const { auditRun, ruleContext } = await withProjectSequenceLock(project.projectId, async () => {
     const sequenceNumber = await persistenceLayer.auditRuns.getNextSequenceNumber(project.projectId);
@@ -87,7 +98,10 @@ export async function executeAndPersistAudit(
       policyVersions: JSON.stringify({ policyVersion: "1.1.0" }),
       configurationSnapshot: {
         crawlSettings: {
-          maxPages: crawlOptions.maxPages ?? 150,
+          maxPages: discoveryCeiling,
+          requestedCrawlLimit: discoveryCeiling,
+          discoveryCeiling: discoveryCeiling,
+          previousKnownScope: knownScope,
           maxDepth: crawlOptions.maxDepth ?? 5,
           userAgent: (crawlOptions as any).userAgent,
           respectRobotsTxt: (crawlOptions as any).respectRobotsTxt !== false,
@@ -107,9 +121,16 @@ export async function executeAndPersistAudit(
 
   const auditRunId = auditRun.auditRunId;
 
-  // 4. Run real crawler pipeline (or custom fixture executor)
+  // 4. Run real crawler pipeline (or custom fixture executor) with known URLs and discovery ceiling
   const crawlerExecutor = customCrawlerExecutor || runSiteAuditCrawl;
-  const crawlResult = await crawlerExecutor(crawlOptions);
+  const effectiveCrawlOptions: CrawlOptions = {
+    ...crawlOptions,
+    maxPages: discoveryCeiling,
+    discoveryCeiling,
+    knownUrls,
+    previousKnownScope: knownScope,
+  };
+  const crawlResult = await crawlerExecutor(effectiveCrawlOptions);
 
   // 5. Transform and persist crawled pages
   const crawledPagesList = crawlResult.crawledPages || (crawlResult as any).pages || [];
@@ -256,9 +277,20 @@ export async function executeAndPersistAudit(
     lowFindings: lowCount,
     informationalFindings: informationalCount,
     seoScore,
-  });
+    discoveryCeiling,
+    discoveredPageCount: auditPages.length,
+    previousKnownScope: knownScope,
+  } as any);
 
-  // 10. Generate Default Comparison against previous audit if available
+  // 10. Update inventory on crawlResult for runtime fidelity
+  if (crawlResult && crawlResult.inventory) {
+    crawlResult.inventory.maxPagesConfigured = discoveryCeiling;
+    crawlResult.inventory.discoveryCeiling = discoveryCeiling;
+    crawlResult.inventory.previousKnownScope = knownScope;
+    crawlResult.inventory.totalCrawled = auditPages.length;
+  }
+
+  // 11. Generate Default Comparison against previous audit if available
   let comparison: AuditComparisonResult | null = null;
   const allProjectRuns = await persistenceLayer.auditRuns.listAuditRunsForProject(project.projectId);
   const previousRun = allProjectRuns.find((r) => r.sequenceNumber === auditRun.sequenceNumber - 1 && r.status === "COMPLETED");
@@ -286,9 +318,50 @@ export async function executeAndPersistAudit(
     await persistenceLayer.auditComparisons.saveComparison(comparison);
   }
 
-  // 11. Update Project latestAuditRunId
+  // 12. Save Authoritative Security Audit Snapshot (SECURITY S7)
+  if (crawlResult && (crawlResult.security || (crawlResult as any).securityAudit)) {
+    const secVm = crawlResult.security || (crawlResult as any).securityAudit;
+    try {
+      await persistenceLayer.securitySnapshots.saveSnapshot({
+        snapshotId: `sec_snap_${auditRunId}`,
+        auditRunId,
+        projectId: project.projectId,
+        domain: project.normalizedDomain,
+        startedAt: auditRun.startedAt,
+        completedAt,
+        securitySchemaVersion: "v1.0.0",
+        ruleCatalogVersion: "v1.0.0-64rules",
+        scorePolicyVersion: "v1.0.0-deductive",
+        remediationContractVersion: "v1.0.0-matrix",
+        score: secVm.scoreBreakdown?.score ?? 100,
+        postureBand: secVm.postureBand ?? "Excellent",
+        criticalCount: secVm.stats?.criticalFindings ?? 0,
+        highCount: secVm.stats?.highFindings ?? 0,
+        mediumCount: secVm.stats?.mediumFindings ?? 0,
+        lowCount: secVm.stats?.lowFindings ?? 0,
+        informationalCount: 0,
+        manualAreasCount: secVm.stats?.manualAssessmentAreas ?? 10,
+        testsExecuted: secVm.stats?.testsExecuted ?? 0,
+        passedControls: secVm.stats?.passedControls ?? 0,
+        totalRulesRegistered: secVm.stats?.totalRulesRegistered ?? 64,
+        requestedCrawlLimit: discoveryCeiling,
+        isPartialAudit: Boolean((crawlResult as any)?.isReducedScopeWarning),
+        payload: secVm,
+        createdAt: completedAt,
+      });
+    } catch (secErr) {
+      console.error("[Persistence Bridge] Failed to save security audit snapshot:", secErr);
+    }
+  }
+
+  // 13. Update Project latestAuditRunId and preserved discovery ceiling
   await persistenceLayer.projects.updateProject(project.projectId, {
     latestAuditRunId: auditRunId,
+    metadata: {
+      ...(project.metadata || {}),
+      crawlDiscoveryCeiling: discoveryCeiling,
+      lastDiscoveredPageCount: auditPages.length,
+    },
   });
 
   // 12. Reconstruct point-in-time historical report markdown

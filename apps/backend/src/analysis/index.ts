@@ -58,7 +58,10 @@ export const analyzeSite = async (options: AnalyzeOptions): Promise<AnalysisResu
   const signal = controller.signal;
 
   try {
-    const psiPromise = fetchPsi(normalizedUrl, strategy, locale, { skipCache, signal });
+    const psiPromise = fetchPsi(normalizedUrl, strategy, locale, { skipCache, signal }).catch((err) => {
+      console.warn(`[PSI Warning] fetchPsi failed for ${normalizedUrl} (${err?.message || err}). Continuing audit with crawler engine.`);
+      return null;
+    });
     const htmlPromise = fetchHtmlDocument(normalizedUrl, { skipCache, signal });
     const robotsPromise = fetchRobotsTxt(new URL(normalizedUrl), { skipCache, signal });
 

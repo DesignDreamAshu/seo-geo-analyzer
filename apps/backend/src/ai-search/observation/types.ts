@@ -11,7 +11,8 @@ export type AIProviderId =
   | "PERPLEXITY"
   | "ANTHROPIC"
   | "COPILOT"
-  | "MANUAL_IMPORT";
+  | "MANUAL_IMPORT"
+  | "OPENROUTER";
 
 export type ObservationSamplingMode = "QUICK" | "STANDARD" | "HIGH_CONFIDENCE";
 
@@ -149,6 +150,8 @@ export interface AIProviderResponse {
   fallbackUsed?: boolean;
   fallbackReason?: string | null;
   observedAt: string;
+  executionMetadata?: Record<string, any>;
+  tokensUsed?: { promptTokens: number; completionTokens: number; totalTokens: number };
 }
 
 export interface AIObservation {

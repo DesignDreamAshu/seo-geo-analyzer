@@ -15,6 +15,9 @@ import type {
   CrawlProgress,
   CrawlTerminationReason,
 } from "./types";
+import { collectSecurityFacts } from "./security/facts-collector";
+import { evaluateSecurityAudit } from "./security/engine";
+import { buildSecurityAuditViewModel } from "./security/scoring/view-model-builder";
 
 /**
  * Main Sitechecker-grade Multi-Page Site Crawler Engine.
@@ -81,6 +84,22 @@ export async function runSiteAuditCrawl(options: CrawlOptions): Promise<CrawlAud
         depth: 1,
       });
       console.log(`[Crawler] Enqueued from sitemap: ${sitemapEntry.loc}`);
+    }
+  }
+
+  // Add all previously known URLs from prior audit into the queue up to maxPages
+  if (options.knownUrls && options.knownUrls.length > 0) {
+    for (const knownUrl of options.knownUrls.slice(0, maxPages)) {
+      const normKnown = normalizeUrl(knownUrl);
+      if (normKnown && !queuedSet.has(normKnown) && isUrlInScope(normKnown, seedNormalized, options.allowSubdomains)) {
+        queuedSet.add(normKnown);
+        queue.push({
+          url: knownUrl,
+          normalizedUrl: normKnown,
+          depth: 1,
+        });
+        console.log(`[Crawler] Enqueued from previous known scope: ${normKnown}`);
+      }
     }
   }
 
@@ -331,6 +350,8 @@ export async function runSiteAuditCrawl(options: CrawlOptions): Promise<CrawlAud
     urlsFailed: brokenPages.length,
     urlsRemainingInQueue: queue.length,
     maxPagesConfigured: maxPages,
+    discoveryCeiling: options.discoveryCeiling || maxPages,
+    previousKnownScope: options.previousKnownScope,
     crawlTerminationReason: terminationReason,
     isGraphDiscoveryComplete,
     crawlCoverageEvaluation,
@@ -342,6 +363,16 @@ export async function runSiteAuditCrawl(options: CrawlOptions): Promise<CrawlAud
     opportunities: ruleResults.issues.filter((i) => i.severity === "opportunity").length,
     notices: ruleResults.issues.filter((i) => i.severity === "notice").length,
   };
+
+  // Collect Security Audit Facts & Execute Certified Security Engine (S1-S5)
+  let securityViewModel = null;
+  try {
+    const securityFacts = await collectSecurityFacts(crawledPages, { seedUrl: options.seedUrl });
+    const securityEval = await evaluateSecurityAudit(securityFacts);
+    securityViewModel = buildSecurityAuditViewModel(securityFacts, securityEval);
+  } catch (err: any) {
+    console.error("[Security Engine Evaluation Error]", err);
+  }
 
   reportProgress({ status: "completed", percent: 100 });
 
@@ -373,6 +404,7 @@ export async function runSiteAuditCrawl(options: CrawlOptions): Promise<CrawlAud
       botBlockedExternalCount: graphAnalysis.botBlockedExternalLinks.length,
       externalLinkTelemetry: graphAnalysis.externalLinkTelemetry,
     },
+    security: securityViewModel,
   };
 
   console.log(`\n========================================`);

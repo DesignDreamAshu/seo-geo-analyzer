@@ -15,6 +15,7 @@ import { SQLiteAuditFindingRepository } from "./repositories/sqlite-audit-findin
 import { SQLiteAuditMetricRepository } from "./repositories/sqlite-audit-metric-repo";
 import { SQLiteAuditComparisonRepository } from "./repositories/sqlite-audit-comparison-repo";
 import { SQLiteAuditSnapshotRepository } from "./repositories/sqlite-audit-snapshot-repo";
+import { SQLiteSecuritySnapshotRepository } from "../security/history/sqlite-security-snapshot-repo";
 
 export * from "./types";
 export * from "./schema";
@@ -23,6 +24,10 @@ export * from "./fingerprint";
 export * from "./comparison-engine";
 export * from "./historical-report";
 export * from "./crawler-persistence-bridge";
+export * from "../security/history/types";
+export * from "../security/history/sqlite-security-snapshot-repo";
+export * from "../security/history/security-history-engine";
+export * from "../security/history/security-fix-verifier";
 
 export interface PersistenceLayer {
   db: DatabaseSync;
@@ -33,6 +38,7 @@ export interface PersistenceLayer {
   auditMetrics: SQLiteAuditMetricRepository;
   auditComparisons: SQLiteAuditComparisonRepository;
   auditSnapshots: SQLiteAuditSnapshotRepository;
+  securitySnapshots: SQLiteSecuritySnapshotRepository;
 }
 
 export function createPersistenceLayer(customDb?: DatabaseSync | string): PersistenceLayer {
@@ -55,6 +61,7 @@ export function createPersistenceLayer(customDb?: DatabaseSync | string): Persis
     }
   } else if (customDb) {
     db = customDb;
+    runMigrations(db);
   } else {
     db = getDatabase();
   }
@@ -68,5 +75,6 @@ export function createPersistenceLayer(customDb?: DatabaseSync | string): Persis
     auditMetrics: new SQLiteAuditMetricRepository(db),
     auditComparisons: new SQLiteAuditComparisonRepository(db),
     auditSnapshots: new SQLiteAuditSnapshotRepository(db),
+    securitySnapshots: new SQLiteSecuritySnapshotRepository(db),
   };
 }

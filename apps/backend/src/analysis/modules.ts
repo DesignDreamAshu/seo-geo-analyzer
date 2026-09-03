@@ -118,8 +118,8 @@ export const evaluateLinkSample = async (
 };
 
 const computePerformance: ModuleComputer = (ctx) => {
-  const audits = ctx.psi.lighthouseResult?.audits ?? {};
-  const categories = ctx.psi.lighthouseResult?.categories ?? {};
+  const audits = ctx.psi?.lighthouseResult?.audits ?? {};
+  const categories = ctx.psi?.lighthouseResult?.categories ?? {};
   const perfScore = typeof categories.performance?.score === "number" ? categories.performance.score : 0;
   const score = roundScore((perfScore || 0) * 10);
 

@@ -222,6 +222,11 @@ export function computeAuditComparison(input: CompareAuditsInput): AuditComparis
       if (!relevantCurrentPage && currentPages.length > 0) {
         uncomparableCount += 1;
         getRuleBucket(base.ruleId).uncomparable += 1;
+        const currMaxPages = currentAudit.configurationSnapshot?.crawlSettings?.maxPages || 0;
+        const isScopeIntentionallyReduced = currMaxPages > 0 && currMaxPages < baselinePages.length;
+        const changeReason = isScopeIntentionallyReduced
+          ? `Audit crawl ceiling (${currMaxPages}) is lower than baseline scope (${baselinePages.length}). Page was not observed; finding cannot be resolved.`
+          : "Page was not crawled in current audit. Evidence insufficient to determine resolution.";
         findingDiffs.push({
           findingFingerprint: fprint,
           ruleId: base.ruleId,
@@ -229,7 +234,7 @@ export function computeAuditComparison(input: CompareAuditsInput): AuditComparis
           previousSeverity: base.severity,
           comparisonState: "UNCOMPARABLE",
           previousEvidence: base.evidence,
-          changeReason: "Page was not crawled in current audit. Evidence insufficient to determine resolution.",
+          changeReason,
           firstSeenAuditRunId,
           lastSeenAuditRunId,
           reopenCount: reopenCountVal,

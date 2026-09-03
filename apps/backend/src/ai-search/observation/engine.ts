@@ -20,6 +20,7 @@ import { OpenAIProviderAdapter } from "./adapters/openai-adapter";
 import { GeminiProviderAdapter } from "./adapters/gemini-adapter";
 import { PerplexityProviderAdapter } from "./adapters/perplexity-adapter";
 import { ManualImportProviderAdapter, ManualImportPayload } from "./adapters/manual-import-adapter";
+import { OpenRouterProviderAdapter } from "./adapters/openrouter-adapter";
 import { extractObservationIntelligence } from "./extractor";
 import { SqliteObservationRepository } from "./persistence/sqlite-observation-repo";
 import { getDatabase } from "../../crawler/persistence/db";
@@ -33,6 +34,7 @@ export class AIVisibilityObservationEngine {
     this.registerProvider(new OpenAIProviderAdapter());
     this.registerProvider(new GeminiProviderAdapter());
     this.registerProvider(new PerplexityProviderAdapter());
+    this.registerProvider(new OpenRouterProviderAdapter());
     this.registerProvider(new ManualImportProviderAdapter());
   }
 

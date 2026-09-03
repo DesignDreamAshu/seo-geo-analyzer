@@ -89,6 +89,9 @@ export interface RuleEvaluationContext {
 export interface AuditRunConfigurationSnapshot {
   crawlSettings: {
     maxPages?: number;
+    requestedCrawlLimit?: number;
+    discoveryCeiling?: number;
+    previousKnownScope?: number;
     maxDepth?: number;
     userAgent?: string;
     respectRobotsTxt?: boolean;
@@ -143,6 +146,9 @@ export interface AuditRunEntity {
     lowFindings: number;
     informationalFindings: number;
     seoScore?: number;
+    discoveryCeiling?: number;
+    discoveredPageCount?: number;
+    previousKnownScope?: number;
   };
 }
 

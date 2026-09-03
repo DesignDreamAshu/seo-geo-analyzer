@@ -62,6 +62,8 @@ import {
   ClientPdfGenerator,
   RemediationCsvExporter,
 } from "./reporting";
+import { AIReportGenerator } from "./ai-search/reporting/ai-report-generator";
+import { globalAIEntitlementService } from "./ai-search/entitlement/ai-entitlement-service";
 import type { ExportPayload, ModuleSnapshot } from "./types";
 
 const PSI_URL = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
@@ -206,6 +208,8 @@ const normalizeExportPayload = (payload: ExportPayload): ExportPayload => {
       overallScore: Number(snapshot?.overallScore ?? 0),
     })),
     groupedRecommendations: buildGroupedRecommendations(normalizedModules),
+    security: payload.security || payload.securityAudit || null,
+    securityAudit: payload.securityAudit || payload.security || null,
   };
 };
 
@@ -261,6 +265,60 @@ const renderReportHtml = (payload: ExportPayload) => {
     </div>
   `;
 
+  const sec = payload.security || payload.securityAudit;
+  const securitySectionHtml = sec
+    ? `
+    <section style="margin-bottom:24px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;">
+      <h2 style="margin-top:0;">Website Security Posture & Configuration Audit (S1-S6)</h2>
+      <p style="margin:4px 0 16px 0;color:#4b5563;">
+        <strong>Security Posture Score:</strong> ${sec.scoreBreakdown?.score ?? 100}/100 (${escapeHtml(sec.scoreBreakdown?.posture ?? "Excellent")}) &middot;
+        <strong>Tests Executed:</strong> ${sec.stats?.testsExecuted ?? 54} &middot;
+        <strong>Findings:</strong> ${sec.findings?.length ?? 0} &middot;
+        <strong>Manual Assessment Areas:</strong> ${sec.stats?.manualAreasCount ?? 10}
+      </p>
+      ${
+        Array.isArray(sec.categoryHealth) && sec.categoryHealth.length
+          ? `
+        <table style="width:100%;border-collapse:collapse;margin-top:12px;font-size:13px;">
+          <thead>
+            <tr style="background:#f3f4f6;">
+              <th style="text-align:left;padding:8px;border:1px solid #e5e7eb;">Security Category</th>
+              <th style="text-align:left;padding:8px;border:1px solid #e5e7eb;">Score</th>
+              <th style="text-align:left;padding:8px;border:1px solid #e5e7eb;">Posture</th>
+              <th style="text-align:left;padding:8px;border:1px solid #e5e7eb;">Coverage / Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${sec.categoryHealth
+              .map(
+                (cat: any) => `
+              <tr>
+                <td style="padding:8px;border:1px solid #e5e7eb;"><strong>${escapeHtml(cat.categoryName)}</strong></td>
+                <td style="padding:8px;border:1px solid #e5e7eb;">${cat.score}/100</td>
+                <td style="padding:8px;border:1px solid #e5e7eb;">${escapeHtml(cat.posture || "Evaluated")}</td>
+                <td style="padding:8px;border:1px solid #e5e7eb;">${cat.passedRules}/${cat.applicableRules} passed (${escapeHtml(cat.summaryExplanation || cat.status)})</td>
+              </tr>
+            `,
+              )
+              .join("")}
+          </tbody>
+        </table>
+      `
+          : ""
+      }
+      <div style="margin-top:16px;padding:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;color:#475569;">
+        <strong style="color:#0f172a;">Assessment Capabilities & Limitations:</strong>
+        <ul style="margin:6px 0 0 0;padding-left:18px;">
+          <li><strong>Deprecated TLS Protocol Validation:</strong> Not Available (Passive audit does not execute deprecated protocol handshake probes).</li>
+          <li><strong>DNSSEC Validation:</strong> Not Observable (Standard DNS resolver lacks DNSSEC DO-flag telemetry).</li>
+          <li><strong>Vulnerability Advisory Intelligence:</strong> Provider Required (Live CVE/GHSA lookup requires authenticated provider).</li>
+          <li><strong>Active Exploit Testing:</strong> Not Available (Passive configuration posture only; requires manual penetration testing).</li>
+        </ul>
+      </div>
+    </section>
+  `
+    : "";
+
   return `<!doctype html>
   <html>
     <head>
@@ -296,8 +354,9 @@ const renderReportHtml = (payload: ExportPayload) => {
           ${groupedHtml("Improvements", grouped.improvements)}
         </div>
       </section>
+      ${securitySectionHtml}
       <section>
-        <h2>Modules</h2>
+        <h2>SEO Modules</h2>
         ${modulesHtml}
       </section>
     </body>
@@ -959,6 +1018,161 @@ app.get("/api/projects/:projectId/urls/history", async (req, res) => {
   }
 });
 
+// 9.1. Security Posture History Timeline (SECURITY S7)
+app.get("/api/projects/:projectId/security/history", async (req, res) => {
+  try {
+    const project = await persistence.projects.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const snapshots = await persistence.securitySnapshots.listSnapshotsForProject(req.params.projectId, 100);
+    const timelineResponse = persistence.securitySnapshots
+      ? (await import("./crawler/security/history/security-history-engine")).buildSecurityHistoryTimeline(
+          project.projectId,
+          project.normalizedDomain,
+          snapshots
+        )
+      : null;
+
+    return res.json({ ok: true, history: timelineResponse });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 9.2. Security Audit Comparison (Baseline vs Current) (SECURITY S7)
+app.get("/api/projects/:projectId/security/compare", async (req, res) => {
+  try {
+    const { baselineAuditRunId, currentAuditRunId } = req.query as {
+      baselineAuditRunId: string;
+      currentAuditRunId: string;
+    };
+    if (!baselineAuditRunId || !currentAuditRunId) {
+      return res.status(400).json({ error: "baselineAuditRunId and currentAuditRunId are required" });
+    }
+
+    const baselineSnapshot = await persistence.securitySnapshots.getSnapshotByAuditRunId(baselineAuditRunId);
+    const currentSnapshot = await persistence.securitySnapshots.getSnapshotByAuditRunId(currentAuditRunId);
+
+    if (!baselineSnapshot || !currentSnapshot) {
+      return res.status(404).json({ error: "One or both security audit snapshots were not found." });
+    }
+
+    const allProjectSnapshots = await persistence.securitySnapshots.listSnapshotsForProject(req.params.projectId, 100);
+    const { compareSecuritySnapshots } = await import("./crawler/security/history/security-history-engine");
+    const comparison = compareSecuritySnapshots(baselineSnapshot, currentSnapshot, allProjectSnapshots);
+
+    return res.json({ ok: true, comparison });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 9.3. Security Finding Lifecycle History (SECURITY S7)
+app.get("/api/projects/:projectId/security/findings/:findingId/history", async (req, res) => {
+  try {
+    const { projectId, findingId } = req.params;
+    const snapshots = await persistence.securitySnapshots.listSnapshotsForProject(projectId, 100);
+    const verifyEvents = await persistence.securitySnapshots.listVerificationEventsForFinding(projectId, findingId);
+
+    const occurrences: Array<{
+      auditRunId: string;
+      completedAt: string;
+      status: "DETECTED" | "ABSENT" | "VERIFIED";
+      severity?: string;
+      scoreAtAudit?: number;
+    }> = [];
+
+    for (const snap of snapshots) {
+      const findings = snap.payload?.findings || [];
+      const match = findings.find((f: any) => {
+        const id = (f.ruleId || "").toLowerCase();
+        return id.includes(findingId.toLowerCase()) || findingId.toLowerCase().includes(id);
+      });
+
+      occurrences.push({
+        auditRunId: snap.auditRunId,
+        completedAt: snap.completedAt || snap.startedAt,
+        status: match ? "DETECTED" : "ABSENT",
+        severity: match?.severity,
+        scoreAtAudit: snap.score,
+      });
+    }
+
+    return res.json({
+      ok: true,
+      findingId,
+      occurrences,
+      verificationEvents: verifyEvents,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 9.4. Targeted Security Fix Verification (SECURITY S7)
+app.post("/api/projects/:projectId/security/verify-fix", async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const {
+      sourceAuditId,
+      findingId,
+      ruleId,
+      targetUrl,
+      scope,
+      method,
+      affectedUrls,
+    } = req.body || {};
+
+    if (!findingId || !ruleId) {
+      return res.status(400).json({ error: "findingId and ruleId are required for targeted verification." });
+    }
+
+    const { executeTargetedSecurityVerification } = await import("./crawler/security/history/security-fix-verifier");
+    const result = await executeTargetedSecurityVerification({
+      projectId,
+      sourceAuditId: sourceAuditId || "unknown_audit",
+      findingId,
+      ruleId,
+      targetUrl,
+      scope,
+      method,
+      affectedUrls,
+    });
+
+    // Persist the immutable verification event
+    await persistence.securitySnapshots.saveVerificationEvent({
+      eventId: result.eventId,
+      projectId,
+      sourceAuditId: sourceAuditId || "unknown_audit",
+      findingId,
+      ruleId,
+      targetUrl,
+      startedAt: result.startedAt,
+      completedAt: result.completedAt,
+      method: result.method,
+      scope: scope || "HOST",
+      result: result.result,
+      evidenceSummary: result.evidenceSummary,
+      errorMessage: result.errorMessage,
+      createdAt: result.completedAt,
+    });
+
+    return res.json({ ok: true, verification: result });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 9.5. List Security Verification Events (SECURITY S7)
+app.get("/api/projects/:projectId/security/verification-events", async (req, res) => {
+  try {
+    const events = await persistence.securitySnapshots.listVerificationEventsForProject(req.params.projectId, 50);
+    return res.json({ ok: true, events });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 // 10. Trigger Full Re-Crawl Audit for Project (Strictly inheriting source audit configuration)
 app.post("/api/projects/:projectId/recrawl", async (req, res) => {
   try {
@@ -972,23 +1186,47 @@ app.post("/api/projects/:projectId/recrawl", async (req, res) => {
       : await persistence.auditRuns.getLatestAuditRunForProject(req.params.projectId);
 
     const prevConfig = sourceAudit?.configurationSnapshot?.crawlSettings;
-    const prevMaxPages = prevConfig?.maxPages;
+    const prevRequestedLimit = prevConfig?.requestedCrawlLimit ?? prevConfig?.discoveryCeiling ?? prevConfig?.maxPages;
     const prevMaxDepth = prevConfig?.maxDepth;
+    const projectCeiling = project.metadata?.crawlDiscoveryCeiling;
+    const prevDiscoveredPages = sourceAudit?.summaryStats?.pagesCrawled || project.metadata?.lastDiscoveredPageCount || 0;
 
     let isConfigFallback = false;
+    let isReducedScopeWarning = false;
     let effectiveMaxPages: number;
+
     if (typeof maxPages === "number" && maxPages > 0) {
+      // 1. User explicitly requested a custom ceiling for this re-crawl
       effectiveMaxPages = maxPages;
-    } else if (typeof prevMaxPages === "number" && prevMaxPages > 0) {
-      effectiveMaxPages = prevMaxPages;
+      if (prevDiscoveredPages > 0 && maxPages < prevDiscoveredPages) {
+        isReducedScopeWarning = true;
+      }
+      // Update project-level discovery ceiling with user's new explicit choice
+      await persistence.projects.updateProject(project.projectId, {
+        metadata: {
+          ...(project.metadata || {}),
+          crawlDiscoveryCeiling: maxPages,
+        },
+      });
+    } else if (typeof prevRequestedLimit === "number" && prevRequestedLimit > 0) {
+      // 2. Inherit authoritative discovery ceiling from source audit
+      effectiveMaxPages = prevRequestedLimit;
+    } else if (typeof projectCeiling === "number" && projectCeiling > 0) {
+      // 3. Inherit project-level persisted discovery ceiling
+      effectiveMaxPages = projectCeiling;
+    } else if (prevDiscoveredPages > 0) {
+      // 4. Legacy fallback: must be >= previous discovered page count, never defaulting to a lower cap (e.g. 150)
+      effectiveMaxPages = Math.max(prevDiscoveredPages, 300);
+      isConfigFallback = true;
     } else {
-      effectiveMaxPages = 150;
+      // 5. Product default
+      effectiveMaxPages = 300;
       isConfigFallback = true;
     }
 
     const effectiveMaxDepth = (typeof maxDepth === "number" && maxDepth > 0) ? maxDepth : (prevMaxDepth && prevMaxDepth > 0 ? prevMaxDepth : 5);
 
-    console.log(`[API /api/projects/:projectId/recrawl] Re-crawling ${project.primaryDomain} | Source audit: ${sourceAudit?.auditRunId || "latest"} | Inherited maxPages: ${effectiveMaxPages} (fallback: ${isConfigFallback}) | maxDepth: ${effectiveMaxDepth}`);
+    console.log(`[API /api/projects/:projectId/recrawl] Re-crawling ${project.primaryDomain} | Source audit: ${sourceAudit?.auditRunId || "latest"} | Inherited maxPages: ${effectiveMaxPages} (fallback: ${isConfigFallback}, reducedScopeWarning: ${isReducedScopeWarning}, knownScope: ${prevDiscoveredPages}) | maxDepth: ${effectiveMaxDepth}`);
 
     sendEvent("crawler:start", { url: project.primaryDomain });
     const output = await executeAndPersistAudit({
@@ -997,6 +1235,8 @@ app.post("/api/projects/:projectId/recrawl", async (req, res) => {
       crawlOptions: {
         seedUrl: project.primaryDomain,
         maxPages: effectiveMaxPages,
+        discoveryCeiling: effectiveMaxPages,
+        previousKnownScope: prevDiscoveredPages,
         maxDepth: effectiveMaxDepth,
         onProgress: (p) => sendEvent("crawler:progress", p),
       },
@@ -1008,7 +1248,14 @@ app.post("/api/projects/:projectId/recrawl", async (req, res) => {
       healthScore: output.metrics.seoScore,
       siteAudit: output.crawlResult,
     });
-    return res.json({ ok: true, isConfigFallback, effectiveMaxPages, ...output });
+    return res.json({
+      ok: true,
+      isConfigFallback,
+      isReducedScopeWarning,
+      knownPreviousScope: prevDiscoveredPages,
+      effectiveMaxPages,
+      ...output,
+    });
   } catch (err) {
     return res.status(500).json({ error: (err as Error).message });
   }
@@ -1273,13 +1520,20 @@ app.post("/api/analyze", async (req, res) => {
     return res.status(400).json({ error: "url is required" });
   }
 
-  const requestedMaxPages = Number(maxPages) > 0 ? Number(maxPages) : 150;
-  console.log(`[API /api/analyze] Starting analysis for ${url} | Requested maxPages: ${requestedMaxPages}`);
-
   try {
     sendEvent("crawler:start", { url });
 
     const project = await ensureProjectForUrl(url);
+    const requestedMaxPages = Number(maxPages) > 0 ? Number(maxPages) : (project?.metadata?.crawlDiscoveryCeiling || 300);
+    console.log(`[API /api/analyze] Starting analysis for ${url} | Requested maxPages: ${requestedMaxPages}`);
+
+    // Persist configured discovery ceiling to project metadata
+    await persistence.projects.updateProject(project.projectId, {
+      metadata: {
+        ...(project.metadata || {}),
+        crawlDiscoveryCeiling: requestedMaxPages,
+      },
+    });
 
     // Run both single-page module audit and multi-page crawler with persistence concurrently
     const [analysis, persistedOutput] = await Promise.all([
@@ -1288,6 +1542,9 @@ app.post("/api/analyze", async (req, res) => {
         strategy,
         locale,
         skipCache: Boolean(skipCache),
+      }).catch((err) => {
+        console.error("analyzeSite error in /api/analyze:", err);
+        return null;
       }),
       executeAndPersistAudit({
         project,
@@ -1295,6 +1552,7 @@ app.post("/api/analyze", async (req, res) => {
         crawlOptions: {
           seedUrl: url,
           maxPages: requestedMaxPages,
+          discoveryCeiling: requestedMaxPages,
           maxDepth: 5,
           concurrency: 5,
           onProgress: (progress) => {
@@ -1388,7 +1646,10 @@ app.post("/api/analyze", async (req, res) => {
     }
 
     const combinedResponse = {
-      ...analysis,
+      ok: true,
+      url,
+      modules: [],
+      ...(analysis || {}),
       siteAudit,
     };
 
@@ -1396,7 +1657,7 @@ app.post("/api/analyze", async (req, res) => {
 
     sendEvent("toast", {
       title: "Analysis complete",
-      description: `Finished auditing ${analysis.url} (${siteAudit?.inventory?.totalCrawled || 1} pages crawled)`,
+      description: `Finished auditing ${analysis?.url || url} (${siteAudit?.inventory?.totalCrawled || 1} pages crawled)`,
     });
   } catch (error) {
     if (error instanceof AnalysisTimeoutError) {
@@ -2873,6 +3134,99 @@ app.get("/api/projects/:projectId/reports/:reportId/export/pdf", async (req, res
     const html = ClientPdfGenerator.generateReportHtml(report);
     res.setHeader("Content-Type", "text/html");
     return res.send(html);
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ============================================================
+// AI EXECUTIVE REPORTING & ENTITLEMENT ENDPOINTS
+// ============================================================
+
+const aiReportGenerator = new AIReportGenerator();
+
+// 50. Check AI Entitlement for Project / User
+app.get("/api/projects/:projectId/ai-entitlement", async (req, res) => {
+  try {
+    const userId = (req.query.userId as string) || "default_user";
+    const entitlement = await globalAIEntitlementService.checkAiReportAccess(userId, req.params.projectId);
+    return res.json({ ok: true, entitlement });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 51. Get Latest AI Analysis Report for Project
+app.get("/api/projects/:projectId/ai-analysis", async (req, res) => {
+  try {
+    const project = (await persistence.projects.getProjectById(req.params.projectId)) ||
+                    (await persistence.projects.getProjectByDomain(req.params.projectId));
+    const targetProjectId = project?.projectId || req.params.projectId;
+
+    const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(targetProjectId);
+    const status = aiReportGenerator.getLatestReportStatus(targetProjectId, latestAudit?.auditRunId);
+
+    return res.json({
+      ok: true,
+      hasReport: status.hasReport,
+      record: status.record,
+      report: status.record?.report || null,
+      isStale: status.isStale,
+      currentAuditRunId: status.currentAuditRunId,
+      reportAuditRunId: status.reportAuditRunId,
+      isDevBypass: globalAIEntitlementService.isDevBypassActive(),
+    });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 52. Generate Structured AI Executive Analysis Report
+app.post("/api/projects/:projectId/ai-analysis", async (req, res) => {
+  try {
+    const project = (await persistence.projects.getProjectById(req.params.projectId)) ||
+                    (await persistence.projects.getProjectByDomain(req.params.projectId));
+    const targetProjectId = project?.projectId || req.params.projectId;
+
+    const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(targetProjectId);
+    if (!latestAudit) {
+      return res.status(404).json({ error: "No completed audit found for this project. Please run an audit crawl first." });
+    }
+
+    const auditSnapshot = await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId);
+    if (!auditSnapshot) {
+      return res.status(404).json({ error: "Audit snapshot data not found." });
+    }
+
+    const payload = JSON.parse(auditSnapshot.payloadJson);
+    const siteAudit = payload.crawlResult || payload.siteAudit || payload;
+
+    const userId = req.body?.userId || "default_user";
+    const preferredModel = req.body?.model;
+
+    const genResult = await aiReportGenerator.generateReport(
+      targetProjectId,
+      latestAudit.auditRunId,
+      siteAudit,
+      userId,
+      preferredModel
+    );
+
+    if (!genResult.success || !genResult.record) {
+      return res.status(400).json({
+        ok: false,
+        error: genResult.error || "Failed to generate AI analysis report.",
+        entitlement: genResult.entitlement,
+      });
+    }
+
+    return res.json({
+      ok: true,
+      report: genResult.record.report,
+      record: genResult.record,
+      entitlement: genResult.entitlement,
+      isDevBypass: genResult.entitlement.isDevBypass,
+    });
   } catch (err) {
     return res.status(500).json({ error: (err as Error).message });
   }

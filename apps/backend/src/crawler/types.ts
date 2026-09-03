@@ -114,6 +114,9 @@ export interface CrawlOptions {
   respectRobotsTxt?: boolean; // default true
   honorCrawlDelay?: boolean; // default true
   renderJsFallback?: boolean; // default false
+  knownUrls?: string[]; // Preserved known URLs from previous authoritative audits
+  discoveryCeiling?: number; // User-selected maximum discovery limit
+  previousKnownScope?: number; // Previous discovered/crawled page count
   onProgress?: (progress: CrawlProgress) => void;
   signal?: AbortSignal;
 }
@@ -921,6 +924,8 @@ export interface CrawlInventory {
   urlsFailed?: number;
   urlsRemainingInQueue?: number;
   maxPagesConfigured?: number;
+  discoveryCeiling?: number;
+  previousKnownScope?: number;
   crawlTerminationReason?: CrawlTerminationReason;
   isGraphDiscoveryComplete?: boolean;
   crawlCoverageEvaluation?: "FULL_COVERAGE" | "LIMITED_BY_MAX_PAGES" | "PARTIAL_CRAWL";
@@ -977,4 +982,5 @@ export interface CrawlAuditResult {
   };
   ruleExecutionObservability?: RuleExecutionRecord[];
   scoreModelVersion?: string;
+  security?: any;
 }
