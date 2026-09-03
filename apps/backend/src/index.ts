@@ -3145,25 +3145,105 @@ app.get("/api/projects/:projectId/reports/:reportId/export/pdf", async (req, res
 
 const aiReportGenerator = new AIReportGenerator();
 
+/**
+ * Robust helper to resolve project entity and audit run from any identifier:
+ * - Project ID (e.g. "proj_hA9aacW1" or "proj_botconsulting")
+ * - Domain / Hostname (e.g. "botconsulting.io" or "www.botconsulting.io")
+ * - Full URL (e.g. "https://www.botconsulting.io/")
+ * - Direct Audit Run ID (e.g. "audit_proj_...")
+ */
+async function resolveProjectAndAudit(rawIdentifier: string, requestedAuditRunId?: string) {
+  if (!rawIdentifier) return { project: null, latestAudit: null, resolvedProjectId: null };
+
+  let cleanId = "";
+  try {
+    cleanId = decodeURIComponent(rawIdentifier).trim();
+  } catch {
+    cleanId = rawIdentifier.trim();
+  }
+
+  // 1. Try getProjectById
+  let project = await persistence.projects.getProjectById(cleanId);
+
+  // 2. Try getProjectByDomain (with domain normalization)
+  if (!project) {
+    const norm = normalizeDomain(cleanId);
+    if (norm) {
+      project = await persistence.projects.getProjectByDomain(norm);
+    }
+  }
+
+  // 3. Try finding across all projects by primaryDomain
+  if (!project) {
+    const norm = normalizeDomain(cleanId);
+    try {
+      const allProjects = await persistence.projects.listProjects();
+      project = allProjects.find(
+        (p) =>
+          p.projectId === cleanId ||
+          p.normalizedDomain === norm ||
+          normalizeDomain(p.primaryDomain) === norm ||
+          p.primaryDomain.includes(norm)
+      ) || null;
+    } catch {}
+  }
+
+  // 4. If project found, find target audit
+  if (project) {
+    if (requestedAuditRunId) {
+      const specificAudit = await persistence.auditRuns.getAuditRunById(requestedAuditRunId);
+      if (specificAudit && specificAudit.status === "COMPLETED") {
+        return { project, latestAudit: specificAudit, resolvedProjectId: project.projectId };
+      }
+    }
+    const latestAudit = (await persistence.auditRuns.getLatestCompletedAuditRun(project.projectId)) ||
+                        (await persistence.auditRuns.getLatestAuditRunForProject(project.projectId));
+    return { project, latestAudit, resolvedProjectId: project.projectId };
+  }
+
+  // 5. If project not found directly, but requestedAuditRunId was passed, check auditRunId directly
+  if (requestedAuditRunId) {
+    const specificAudit = await persistence.auditRuns.getAuditRunById(requestedAuditRunId);
+    if (specificAudit && specificAudit.status === "COMPLETED") {
+      const parentProject = await persistence.projects.getProjectById(specificAudit.projectId);
+      return { project: parentProject || null, latestAudit: specificAudit, resolvedProjectId: specificAudit.projectId };
+    }
+  }
+
+  // 6. If cleanId looks like an auditRunId itself
+  if (cleanId.startsWith("audit_")) {
+    const audit = await persistence.auditRuns.getAuditRunById(cleanId);
+    if (audit) {
+      const parentProject = await persistence.projects.getProjectById(audit.projectId);
+      return { project: parentProject || null, latestAudit: audit, resolvedProjectId: audit.projectId };
+    }
+  }
+
+  return { project: null, latestAudit: null, resolvedProjectId: cleanId };
+}
+
 // 50. Check AI Entitlement for Project / User
 app.get("/api/projects/:projectId/ai-entitlement", async (req, res) => {
   try {
     const userId = (req.query.userId as string) || "default_user";
-    const entitlement = await globalAIEntitlementService.checkAiReportAccess(userId, req.params.projectId);
+    const { resolvedProjectId } = await resolveProjectAndAudit(req.params.projectId);
+    const targetProjectId = resolvedProjectId || req.params.projectId;
+    const entitlement = await globalAIEntitlementService.checkAiReportAccess(userId, targetProjectId);
     return res.json({ ok: true, entitlement });
   } catch (err) {
-    return res.status(500).json({ error: (err as Error).message });
+    return res.status(500).json({ ok: false, code: "INTERNAL_ERROR", error: (err as Error).message });
   }
 });
 
 // 51. Get Latest AI Analysis Report for Project
 app.get("/api/projects/:projectId/ai-analysis", async (req, res) => {
   try {
-    const project = (await persistence.projects.getProjectById(req.params.projectId)) ||
-                    (await persistence.projects.getProjectByDomain(req.params.projectId));
-    const targetProjectId = project?.projectId || req.params.projectId;
+    const { project, latestAudit, resolvedProjectId } = await resolveProjectAndAudit(
+      req.params.projectId,
+      req.query.auditRunId as string | undefined
+    );
+    const targetProjectId = resolvedProjectId || project?.projectId || req.params.projectId;
 
-    const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(targetProjectId);
     const status = aiReportGenerator.getLatestReportStatus(targetProjectId, latestAudit?.auditRunId);
 
     return res.json({
@@ -3172,30 +3252,40 @@ app.get("/api/projects/:projectId/ai-analysis", async (req, res) => {
       record: status.record,
       report: status.record?.report || null,
       isStale: status.isStale,
-      currentAuditRunId: status.currentAuditRunId,
+      currentAuditRunId: status.currentAuditRunId || latestAudit?.auditRunId,
       reportAuditRunId: status.reportAuditRunId,
       isDevBypass: globalAIEntitlementService.isDevBypassActive(),
     });
   } catch (err) {
-    return res.status(500).json({ error: (err as Error).message });
+    return res.status(500).json({ ok: false, code: "INTERNAL_ERROR", error: (err as Error).message });
   }
 });
 
 // 52. Generate Structured AI Executive Analysis Report
 app.post("/api/projects/:projectId/ai-analysis", async (req, res) => {
   try {
-    const project = (await persistence.projects.getProjectById(req.params.projectId)) ||
-                    (await persistence.projects.getProjectByDomain(req.params.projectId));
-    const targetProjectId = project?.projectId || req.params.projectId;
+    const requestedAuditRunId = req.body?.auditRunId || (req.query?.auditRunId as string | undefined);
+    const { project, latestAudit, resolvedProjectId } = await resolveProjectAndAudit(
+      req.params.projectId,
+      requestedAuditRunId
+    );
+    const targetProjectId = resolvedProjectId || project?.projectId || req.params.projectId;
 
-    const latestAudit = await persistence.auditRuns.getLatestAuditRunForProject(targetProjectId);
     if (!latestAudit) {
-      return res.status(404).json({ error: "No completed audit found for this project. Please run an audit crawl first." });
+      return res.status(404).json({
+        ok: false,
+        code: "COMPLETED_AUDIT_NOT_FOUND",
+        error: `No completed audit found for project identifier '${req.params.projectId}'. Please run a crawl first.`
+      });
     }
 
     const auditSnapshot = await persistence.auditSnapshots.getSnapshot(latestAudit.auditRunId);
     if (!auditSnapshot) {
-      return res.status(404).json({ error: "Audit snapshot data not found." });
+      return res.status(404).json({
+        ok: false,
+        code: "AUDIT_SNAPSHOT_NOT_FOUND",
+        error: `Audit snapshot data not found for audit run '${latestAudit.auditRunId}'.`
+      });
     }
 
     const payload = JSON.parse(auditSnapshot.payloadJson);
@@ -3213,8 +3303,11 @@ app.post("/api/projects/:projectId/ai-analysis", async (req, res) => {
     );
 
     if (!genResult.success || !genResult.record) {
-      return res.status(400).json({
+      const statusCode = genResult.entitlement && !genResult.entitlement.allowed ? 403 : 400;
+      const errorCode = genResult.entitlement && !genResult.entitlement.allowed ? "AI_ENTITLEMENT_DENIED" : "AI_REPORT_GENERATION_FAILED";
+      return res.status(statusCode).json({
         ok: false,
+        code: errorCode,
         error: genResult.error || "Failed to generate AI analysis report.",
         entitlement: genResult.entitlement,
       });
@@ -3228,7 +3321,7 @@ app.post("/api/projects/:projectId/ai-analysis", async (req, res) => {
       isDevBypass: genResult.entitlement.isDevBypass,
     });
   } catch (err) {
-    return res.status(500).json({ error: (err as Error).message });
+    return res.status(500).json({ ok: false, code: "INTERNAL_ERROR", error: (err as Error).message });
   }
 });
 
